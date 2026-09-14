@@ -37,7 +37,7 @@ export interface ReturnCustomerRequirementSnapshot {
   serviceAddress?: string | null;
   restDays?: string | null;
   startTime?: string | null;
-  budget?: string | null;
+  budget?: number | null;
   serviceDuration?: string | null;
   workMode?: string | null;
   elderlyCare?: string | null;
@@ -212,7 +212,7 @@ function listCollectedFields(r: ReturnCustomerRequirementSnapshot | null | undef
   if (r.serviceAddress) out.push(`服务地址 ${r.serviceAddress}`);
   if (r.restDays) out.push(`月休 ${r.restDays}`);
   if (r.startTime) out.push(`到岗时间 ${r.startTime}`);
-  if (r.budget) out.push(`薪资预算 ${r.budget}`);
+  if (r.budget) out.push(`薪资预算 ${r.budget}元`);
   if (r.serviceDuration) out.push(`服务周期 ${r.serviceDuration}`);
   if (r.workMode) out.push(`工作制 ${r.workMode}`);
   if (r.elderlyCare) out.push(`老人照护 ${r.elderlyCare}`);

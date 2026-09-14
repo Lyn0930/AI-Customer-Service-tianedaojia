@@ -41,6 +41,8 @@ import {
   NO_AGENT_ONLINE_MESSAGE,
   FRUSTRATION_KEYWORDS,
   FRUSTRATION_TRANSFER_MESSAGE,
+  FEE_INFO_KEYWORDS,
+  FEE_INFO_REPLY,
   buildTemplateReferencePrompt,
   SUGGESTION_PROMPT,
   SUMMARY_PLUGIN_ID,
@@ -107,6 +109,22 @@ const FIELD_LABEL_MAP: Record<string, string> = {
   specialRequirements: '特殊需求',
   familyInfo: '家庭情况',
 };
+
+/**
+ * 预算字符串 → 数字（2026-09-05：budget 列 varchar → integer，入库前统一解析）
+ * 输入形态：AI 提取的 "6000-8000元/月" / "5000" / "大概6000"，或正则匹配的 "6000吧" / "6000元"
+ * 规则（与定稿口径一致：只存总预算数字）：
+ *   - 取第一个出现的数字（区间 6000-8000 → 取下限 6000，保守匹配不超预算）
+ *   - 一个数字都找不到（如 "面议"）→ null（视为未采集）
+ */
+function parseBudgetNumber(raw: string | number | null | undefined): number | null {
+  if (raw == null) return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  const m = raw.match(/\d+/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) ? n : null;
+}
 
 function buildCollectedFields(result: ExtractedRequirement): { field: string; value: string; label: string }[] {
   const map: Record<string, string | null> = {
@@ -663,6 +681,24 @@ export class ChatService {
         lead,
         FRUSTRATION_TRANSFER_MESSAGE,
       );
+      return customerMessage;
+    }
+
+    // 3.7.2 fee_info 收费问法 L1 直出（2026-09-12 中介费=0 定稿，2026-09-14 落地）
+    // 句中含 中介费/服务费/信息费/介绍费 任一费用词 → 直出定稿文案，0 次 LLM 调用。
+    // 排在情绪升级之后：客户已经不耐烦时转人工优先，不能拿模板把人堵回去。
+    // 模糊钱问法（"你们怎么收费"/孤零零"费用多少"）不含这 4 个词，不会被截走，照常走 market_price / L3。
+    // L3 prompt 里另有一份同文案的【收费口径兜底】段做漏网兜底，两处口径恒一致。
+    const feeInfoKeyword = FEE_INFO_KEYWORDS.find((kw) => content.includes(kw));
+    if (feeInfoKeyword) {
+      this.logger.log(
+        `会话 ${session.id} fee_info L1 直出(不走LLM): customer="${content.slice(0, 40)}" keyword=${feeInfoKeyword}`,
+      );
+      await this.db.insert(chatMessages).values({
+        sessionId: session.id,
+        role: 'bot',
+        content: FEE_INFO_REPLY,
+      });
       return customerMessage;
     }
 
@@ -2164,18 +2200,18 @@ export class ChatService {
       `需求提取结果: service_type=${result.service_type}, address=${result.service_address}, budget=${result.budget}`,
     );
 
-    // 判定核心字段是否完成
+    // 判定核心字段是否完成（2026-09-05：budget 是 integer 列，须解析出数字才算采到——"面议"这类非数字不算）
     const isCompleted =
       !!result.service_type &&
       !!result.service_address &&
-      !!result.budget;
+      parseBudgetNumber(result.budget) != null;
 
     const status: RequirementStatus = isCompleted ? 'completed' : 'collecting';
 
     // 构建已采集字段快照
     const collectedFields = buildCollectedFields(result);
 
-    // upsert requirements — merge 模式：不覆盖已有值，只填充新值
+    // upsert requirements — 老值优先：不覆盖已有值，只填充新值（2026-09-12 定稿，与正则链路同语义）
     // 2026-08-15：用 INSERT ... ON CONFLICT (lead_id) DO UPDATE 走 anon 合法路径
     // （anon 没有 UPDATE 政策，UPDATE 会静默 0 行；ON CONFLICT DO UPDATE 走 INSERT WITH CHECK=true 永远 pass）
     await this.db.execute(sql`
@@ -2194,7 +2230,7 @@ export class ChatService {
         ${result.service_address ?? null},
         ${result.helper_requirements ?? null},
         ${result.dietary_preferences ?? null},
-        ${result.budget ?? null},
+        ${parseBudgetNumber(result.budget)},
         ${result.service_duration ?? null},
         ${result.special_requirements ?? null},
         ${result.family_info ?? null},
@@ -2203,39 +2239,42 @@ export class ChatService {
         ${JSON.stringify(collectedFields)}::jsonb
       )
       ON CONFLICT (lead_id) DO UPDATE SET
-        -- 2026-08-15 第三次修复：NULLIF 兜底空字符串。
-        -- 原写法 COALESCE(EXCLUDED.X, requirements.X) 看似 EXCLUDED 优先，
-        -- 但 AI 抽出的空字符串 '' IS NOT NULL，会被 COALESCE 当作有效值钉住行。
-        -- 用 NULLIF(EXCLUDED.X, '') 把 '' 转成 NULL，COALESCE 才会落到 requirements.X。
-        service_type = COALESCE(NULLIF(EXCLUDED.service_type, ''), requirements.service_type),
-        household_size = COALESCE(NULLIF(EXCLUDED.household_size, ''), requirements.household_size),
-        area = COALESCE(NULLIF(EXCLUDED.area, ''), requirements.area),
-        elderly_care = COALESCE(NULLIF(EXCLUDED.elderly_care, ''), requirements.elderly_care),
-        rest_days = COALESCE(NULLIF(EXCLUDED.rest_days, ''), requirements.rest_days),
-        start_time = COALESCE(NULLIF(EXCLUDED.start_time, ''), requirements.start_time),
-        service_address = COALESCE(NULLIF(EXCLUDED.service_address, ''), requirements.service_address),
-        helper_requirements = COALESCE(NULLIF(EXCLUDED.helper_requirements, ''), requirements.helper_requirements),
-        dietary_preferences = COALESCE(NULLIF(EXCLUDED.dietary_preferences, ''), requirements.dietary_preferences),
-        budget = COALESCE(NULLIF(EXCLUDED.budget, ''), requirements.budget),
-        service_duration = COALESCE(NULLIF(EXCLUDED.service_duration, ''), requirements.service_duration),
-        special_requirements = COALESCE(NULLIF(EXCLUDED.special_requirements, ''), requirements.special_requirements),
-        family_info = COALESCE(NULLIF(EXCLUDED.family_info, ''), requirements.family_info),
-        work_mode = COALESCE(NULLIF(EXCLUDED.work_mode, ''), requirements.work_mode),
-        status = EXCLUDED.status,
+        -- 2026-09-12 定稿：全量提取改为"老值优先，只填空不覆盖"。
+        -- 之前写法 COALESCE(NULLIF(EXCLUDED.X,''), requirements.X) 是新值优先（每轮覆盖），
+        -- 会把正则链路先存对的值盖掉；现改为与 mergeRequirementFields 同语义：
+        -- 老值优先，AI 本轮没提到（空/空串）时才落新值。改口场景由顾问后台手动修正兜底。
+        service_type = COALESCE(requirements.service_type, NULLIF(EXCLUDED.service_type, '')),
+        household_size = COALESCE(requirements.household_size, NULLIF(EXCLUDED.household_size, '')),
+        area = COALESCE(requirements.area, NULLIF(EXCLUDED.area, '')),
+        elderly_care = COALESCE(requirements.elderly_care, NULLIF(EXCLUDED.elderly_care, '')),
+        rest_days = COALESCE(requirements.rest_days, NULLIF(EXCLUDED.rest_days, '')),
+        start_time = COALESCE(requirements.start_time, NULLIF(EXCLUDED.start_time, '')),
+        service_address = COALESCE(requirements.service_address, NULLIF(EXCLUDED.service_address, '')),
+        helper_requirements = COALESCE(requirements.helper_requirements, NULLIF(EXCLUDED.helper_requirements, '')),
+        dietary_preferences = COALESCE(requirements.dietary_preferences, NULLIF(EXCLUDED.dietary_preferences, '')),
+        -- budget integer 列无空串问题，同口径：老值优先
+        budget = COALESCE(requirements.budget, EXCLUDED.budget),
+        service_duration = COALESCE(requirements.service_duration, NULLIF(EXCLUDED.service_duration, '')),
+        special_requirements = COALESCE(requirements.special_requirements, NULLIF(EXCLUDED.special_requirements, '')),
+        family_info = COALESCE(requirements.family_info, NULLIF(EXCLUDED.family_info, '')),
+        work_mode = COALESCE(requirements.work_mode, NULLIF(EXCLUDED.work_mode, '')),
+        -- status 只进不退：已 completed 不因某轮 AI 没提到而降回 collecting
+        status = CASE WHEN requirements.status = 'completed' THEN 'completed' ELSE EXCLUDED.status END,
         collected_fields = EXCLUDED.collected_fields
     `);
 
-    // 同步更新 leads 表：采集字段
+    // 同步更新 leads 表：采集字段（2026-09-12 定稿：同 requirements 老值优先，只填空不覆盖，
+    // 防止全量提取某轮抽错把已有正确值盖掉；改口场景由顾问后台手动修正兜底）
     const normalizedType = result.service_type ? normalizeServiceType(result.service_type) : null;
     const urgencyLevel = inferUrgencyLevel(result.start_time);
     await this.db
       .update(leads)
       .set({
-        budgetRange: result.budget ?? null,
-        serviceStartTime: result.start_time ?? null,
-        serviceDuration: result.service_duration ?? null,
-        specialRequirements: result.special_requirements ?? null,
-        familyInfo: result.family_info ?? null,
+        budgetRange: sql`COALESCE(${leads.budgetRange}, ${result.budget ?? null})`,
+        serviceStartTime: sql`COALESCE(${leads.serviceStartTime}, ${result.start_time ?? null})`,
+        serviceDuration: sql`COALESCE(${leads.serviceDuration}, ${result.service_duration ?? null})`,
+        specialRequirements: sql`COALESCE(${leads.specialRequirements}, ${result.special_requirements ?? null})`,
+        familyInfo: sql`COALESCE(${leads.familyInfo}, ${result.family_info ?? null})`,
         urgencyLevel,
         ...(isCompleted ? { status: 'collected', intent: normalizedType } : {}),
       })
@@ -2518,7 +2557,7 @@ export class ChatService {
       area?: string | null;
       householdSize?: string | null;
       workMode?: string | null;
-      budget?: string | null;
+      budget?: number | null;
     },
   ): string {
     // 字段 → 关键词列表。疑问句触发词 + 显式询问触发词分开
@@ -2817,8 +2856,8 @@ export class ChatService {
    */
   private detectFieldsFromConversation(
     messages: typeof chatMessages.$inferSelect[],
-  ): Map<string, string> {
-    const updates = new Map<string, string>();
+  ): Map<string, string | number> {
+    const updates = new Map<string, string | number>();
     const recentCustomerMsgs = messages
       .filter((m) => m.role === 'customer')
       .slice(-8)
@@ -2928,7 +2967,11 @@ export class ChatService {
     for (const pattern of budgetPatterns) {
       const m = text.match(pattern);
       if (m) {
-        updates.set('budget', m[0].trim());
+        // 2026-09-05：budget 列改 integer——匹配原文（如"6000吧""6000-7000元"）解析成数字再入库（区间取下限）
+        const budgetNum = parseBudgetNumber(m[0]);
+        if (budgetNum != null) {
+          updates.set('budget', budgetNum);
+        }
         break;
       }
     }
@@ -2957,7 +3000,7 @@ export class ChatService {
   private async mergeRequirementFields(
     leadId: string,
     existing: Requirement | null,
-    updates: Map<string, string>,
+    updates: Map<string, string | number>,
   ): Promise<void> {
     if (updates.size === 0) return;
 
@@ -2987,9 +3030,17 @@ export class ChatService {
         // 原写法 COALESCE(requirements.X, EXCLUDED.X) 看似 requirements 优先保留老值，
         // 但如果老值是 ''（之前 ON CONFLICT 把空串钉进去了），COALESCE 不会触发 EXCLUDED 覆盖。
         // NULLIF(requirements.X, '') 把 '' 转成 NULL，COALESCE 才会落到 EXCLUDED.X。
-        updateParts.push(
-          sql`${sql.raw(snake)} = COALESCE(NULLIF(requirements.${sql.raw(snake)}, ''), EXCLUDED.${sql.raw(snake)})`,
-        );
+        // 2026-09-05 例外：budget 已是 integer 列，NULLIF(X, '') 会因 integer=text 无隐式转换而报错，
+        // 且 integer 列不存在"空串钉住"问题，直接 COALESCE 即可（老值优先，只填空不覆盖）。
+        if (snake === 'budget') {
+          updateParts.push(
+            sql`${sql.raw(snake)} = COALESCE(requirements.${sql.raw(snake)}, EXCLUDED.${sql.raw(snake)})`,
+          );
+        } else {
+          updateParts.push(
+            sql`${sql.raw(snake)} = COALESCE(NULLIF(requirements.${sql.raw(snake)}, ''), EXCLUDED.${sql.raw(snake)})`,
+          );
+        }
       }
     }
 
@@ -3035,7 +3086,7 @@ export class ChatService {
       parts.push(`阿姨要求: ${req.helperRequirements}`);
     if (req.dietaryPreferences)
       parts.push(`做饭口味: ${req.dietaryPreferences}`);
-    if (req.budget) parts.push(`预算: ${req.budget}`);
+    if (req.budget) parts.push(`预算: ${req.budget}元`);
     return parts.length > 0 ? parts.join('; ') : '暂无已收集的需求信息';
   }
 

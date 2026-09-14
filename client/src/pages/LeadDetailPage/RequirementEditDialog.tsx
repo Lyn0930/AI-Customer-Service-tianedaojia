@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Pencil } from 'lucide-react';
-import type { Requirement } from '@shared/api.interface';
+import type { Requirement, UpdateRequirementRequest } from '@shared/api.interface';
 import { updateRequirement } from '@client/src/api/leads';
 import { toast } from 'sonner';
 import { Button } from '@client/src/components/ui/button';
@@ -59,7 +59,8 @@ const RequirementEditDialog: React.FC<RequirementEditDialogProps> = ({
       const initial: Record<string, string> = {};
       for (const f of FIELDS) {
         const val = requirement[f.key as keyof typeof requirement];
-        initial[f.key] = typeof val === 'string' ? val : '';
+        // budget 现在是 number（2026-09-05），其余仍是 string
+        initial[f.key] = val != null && typeof val !== 'object' ? String(val) : '';
       }
       setForm(initial);
     }
@@ -72,9 +73,16 @@ const RequirementEditDialog: React.FC<RequirementEditDialogProps> = ({
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const data: Record<string, string> = {};
+      const data: UpdateRequirementRequest = {};
       for (const f of FIELDS) {
-        data[f.key] = form[f.key] ?? '';
+        const v = form[f.key] ?? '';
+        if (f.key === 'budget') {
+          // budget 已是数字字段（2026-09-05）：填了数字就转 number，留空/非数字 → null（清空）
+          const num = Number(v);
+          data.budget = v.trim() !== '' && Number.isFinite(num) ? num : null;
+        } else {
+          (data as Record<string, string>)[f.key] = v;
+        }
       }
       await updateRequirement(leadId, data);
       toast.success('需求信息已更新');

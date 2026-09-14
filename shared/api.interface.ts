@@ -350,7 +350,8 @@ export interface Requirement {
   serviceAddress: string | null;
   helperRequirements: string | null;
   dietaryPreferences: string | null;
-  budget: string | null;
+  /** 薪资预算（总预算口径，元/月）。2026-09-05 起 number：只存数字，区间取下限；null = 未采集 */
+  budget: number | null;
   serviceDuration: string | null;
   livingPreference: string | null;
   specialRequirements: string | null;
@@ -860,7 +861,8 @@ export interface UpdateRequirementRequest {
   serviceAddress?: string;
   helperRequirements?: string;
   dietaryPreferences?: string;
-  budget?: string;
+  /** 薪资预算：纯数字（元/月），传 null 表示清空 */
+  budget?: number | null;
   serviceDuration?: string;
   specialRequirements?: string;
   familyInfo?: string;

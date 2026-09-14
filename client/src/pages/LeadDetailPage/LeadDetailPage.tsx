@@ -104,13 +104,15 @@ const ContactStatusBadge: React.FC<ContactStatusBadgeProps> = ({ status }) => {
 
 interface InfoRowProps {
   label: string;
-  value: string | null;
+  value: string | number | null;
 }
 
 const InfoRow: React.FC<InfoRowProps> = ({ label, value }) => (
   <div className="flex py-2 border-b border-gray-100 last:border-0">
     <span className="w-28 shrink-0 text-sm text-gray-400">{label}</span>
-    <span className="flex-1 text-sm text-gray-800">{value || '未填写'}</span>
+    <span className="flex-1 text-sm text-gray-800">
+      {value != null && value !== '' ? `${value}${label === '预算' ? '元' : ''}` : '未填写'}
+    </span>
   </div>
 );
 

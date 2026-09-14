@@ -478,7 +478,8 @@ export const requirements = pgTable("requirements", {
   serviceAddress: text("service_address"),
   helperRequirements: text("helper_requirements"),
   dietaryPreferences: text("dietary_preferences"),
-  budget: varchar("budget", { length: 50 }),
+  /** 薪资预算（总预算口径，元/月）——2026-09-05 varchar → integer，只存数字（区间取下限），null = 未采集 */
+  budget: integer("budget"),
   status: varchar("status", { length: 20 }).notNull().default('collecting'),
   serviceDuration: varchar("service_duration", { length: 50 }),
   livingPreference: varchar("living_preference", { length: 20 }),

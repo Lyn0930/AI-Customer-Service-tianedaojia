@@ -70,7 +70,8 @@ export class BitableSyncService {
         fields['服务地址'] = req.serviceAddress ?? '';
         fields['阿姨要求'] = req.helperRequirements ?? '';
         fields['口味偏好'] = req.dietaryPreferences ?? '';
-        fields['预算'] = req.budget ?? '';
+        // 2026-09-05：requirements.budget 已是 integer——同步到多维表格时转回字符串（表格"预算"列按文本写入，行为与旧版一致）
+        fields['预算'] = req.budget != null ? String(req.budget) : '';
       }
 
       if (lead.bitableRecordId) {

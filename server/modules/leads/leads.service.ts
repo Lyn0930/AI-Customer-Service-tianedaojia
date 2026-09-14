@@ -174,7 +174,7 @@ export class LeadsService {
       serviceAddress: row.serviceAddress ?? '',
       helperRequirements: row.helperRequirements ?? '',
       dietaryPreferences: row.dietaryPreferences ?? '',
-      budget: row.budget ?? '',
+      budget: row.budget ?? null,
       serviceDuration: row.serviceDuration ?? '',
       livingPreference: row.livingPreference ?? '',
       specialRequirements: row.specialRequirements ?? '',

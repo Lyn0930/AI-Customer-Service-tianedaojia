@@ -159,7 +159,8 @@ export class RequirementCollectionService {
       serviceAddress: req.serviceAddress,
       helperRequirements: req.helperRequirements,
       dietaryPreferences: req.dietaryPreferences,
-      budget: req.budget,
+      // 2026-09-05：budget 已是 number——本 map 的消费方（采集进度/引导话术）都按字符串处理，这里统一转回 string
+      budget: req.budget != null ? String(req.budget) : null,
       serviceDuration: req.serviceDuration,
       livingPreference: req.livingPreference,
       specialRequirements: req.specialRequirements,

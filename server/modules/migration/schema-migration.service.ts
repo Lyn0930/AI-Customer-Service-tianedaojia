@@ -75,12 +75,13 @@ export class SchemaMigrationService implements OnModuleInit {
     @Inject(DRIZZLE_DATABASE) private readonly db: PostgresJsDatabase,
   ) {}
 
-  /** Nest 启动钩子：自动跑 leads 列补齐 + skill_tag 数据迁移 + salary_config 表/列/seed。
+  /** Nest 启动钩子：自动跑 leads 列补齐 + skill_tag 数据迁移 + salary_config 表/列/seed + budget 列类型迁移。
    *  in-memory 短路 flag 保证只跑一次；任意一步失败都不阻塞其它步骤与启动。 */
   async onModuleInit(): Promise<void> {
     await this.ensureLeadsRoutingColumns();
     await this.ensureAgentSkillsTagMigration();
     await this.ensureSalaryConfigTableAndSeed();
+    await this.ensureBudgetColumnInteger();
   }
 
   /** 幂等：仅第一次调用真正跑 ALTER；后续直接返回。失败不抛、不重试。 */
@@ -440,6 +441,61 @@ export class SchemaMigrationService implements OnModuleInit {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`${marker} seed 失败（不阻塞）: ${message}`);
+    }
+  }
+
+  // ==================== requirements.budget 列类型迁移 2026-09-05 ====================
+  // 业务背景：需求采集只采"总预算"一个金额字段（README §5 定稿），后续要做 预算−2000 派生工资，
+  // budget 必须是可计算的数值。旧列是 varchar(50)，历史值形如 "6000元"、"6000-8000元/月"、"大概6000"、"6000吧"。
+  //
+  // 迁移规则（与 chat.service.parseBudgetNumber 口径一致）：
+  //   - 取第一个出现的数字（区间 6000-8000 → 6000，保守取下限）
+  //   - 提不出数字（如 "面议"）→ NULL（视为未采集）
+  //
+  // 幂等：已是 integer 则跳过；失败不阻塞启动——列保持 varchar 时，
+  // 新写入的数字参数会以文本形态落库（"6000"），后续重试迁移仍可正常转换。
+
+  private static readonly BUDGET_MIGRATION_MARKER =
+    '[schema-migration:requirements-budget-integer-2026-09-05]';
+
+  private budgetColumnMigrationCompleted = false;
+
+  async ensureBudgetColumnInteger(): Promise<void> {
+    if (this.budgetColumnMigrationCompleted) return;
+    const marker = SchemaMigrationService.BUDGET_MIGRATION_MARKER;
+
+    try {
+      const typeResult = await this.db.execute<{ data_type: string }>(
+        sql`SELECT data_type FROM information_schema.columns
+            WHERE table_name = 'requirements' AND column_name = 'budget' LIMIT 1`,
+      );
+      const typeRows = typeResult as unknown as Array<{ data_type: string }>;
+      if (typeRows.length === 0) {
+        this.logger.warn(`${marker} requirements.budget 列不存在，跳过（建表流程负责）`);
+        return;
+      }
+      if (typeRows[0].data_type === 'integer') {
+        this.logger.log(`${marker} budget 已是 integer，跳过`);
+        this.budgetColumnMigrationCompleted = true;
+        return;
+      }
+
+      this.logger.log(
+        `${marker} budget 当前类型 ${typeRows[0].data_type}，开始 ALTER TYPE integer（历史值取第一个数字，区间取下限，无数字置 NULL）`,
+      );
+      await this.db.execute(sql`
+        ALTER TABLE requirements
+        ALTER COLUMN budget TYPE integer
+        USING (substring(budget from '(\\d+)'))::integer
+      `);
+      this.logger.log(`${marker} ✓ ALTER 完成，budget 已转为 integer`);
+      this.budgetColumnMigrationCompleted = true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `${marker} 迁移失败（不阻塞启动，下次重启自动重试）。可手动执行 SQL：` +
+          `ALTER TABLE requirements ALTER COLUMN budget TYPE integer USING (substring(budget from '(\\d+)'))::integer; 错误：${message}`,
+      );
     }
   }
 }
