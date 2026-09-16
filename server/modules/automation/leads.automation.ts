@@ -2,8 +2,8 @@ import { Logger } from '@nestjs/common';
 import { Automation, BindTrigger } from '@lark-apaas/fullstack-nestjs-core';
 import { Inject } from '@nestjs/common';
 import { DRIZZLE_DATABASE, type PostgresJsDatabase } from '@lark-apaas/fullstack-nestjs-core';
-import { and, eq, sql, isNotNull } from 'drizzle-orm';
-import { leads, chatSessions, chatMessages } from '@server/database/schema';
+import { and, eq, sql } from 'drizzle-orm';
+import { leads } from '@server/database/schema';
 import { LeadsService } from '../leads/leads.service';
 
 @Automation()
@@ -29,105 +29,8 @@ export class LeadsAutomationService {
     this.logger.log(`自动分配完成，分配 ${result.assignedCount} 条`);
   }
 
-  // ===== 2026-08-14 避免"无人管"3 层 - 第 3 层超时兜底 =====
-  /**
-   * 监控转人工后经纪人 5/10/30 分钟未回复的线索，写入告警日志供工作台侧边栏展示。
-   * - 5min：仅记录告警（提示经纪人"客户还在等"）
-   * - 10min：标记 fallbackNotifiedAt（系统自动回退 + 给客户发"客服繁忙"话术）
-   * - 30min：触发投诉预警（escalateToSupervisor 重新升级主管）
-   */
-  @BindTrigger('routing_inactive_warn_5min')
-  async monitorInactiveAgentsWarn() {
-    const since = new Date(Date.now() - 5 * 60_000);
-    const since10 = new Date(Date.now() - 10 * 60_000);
-    const since30 = new Date(Date.now() - 30 * 60_000);
-
-    // 找出已分配（assigneeId 非空）但 5min 内经纪人没发过任何消息的 lead
-    const inactiveLeads = await this.db
-      .select({
-        leadId: leads.id,
-        assigneeId: leads.assigneeId,
-        customerName: leads.customerName,
-        city: leads.serviceCity,
-        assignedAt: leads.assignedAt,
-        fallbackNotifiedAt: leads.fallbackNotifiedAt,
-        escalatedToSupervisor: leads.escalatedToSupervisor,
-      })
-      .from(leads)
-      .where(
-        and(
-          isNotNull(leads.assigneeId),
-          sql`${leads.status} IN ('chatting', 'pending_assignment')`,
-        ),
-      );
-
-    let warn5 = 0;
-    let fallback10 = 0;
-    let escalate30 = 0;
-
-    for (const lead of inactiveLeads) {
-      if (!lead.assignedAt) continue;
-      const lastAgentMsg = await this.db
-        .select({ createdAt: chatMessages.createdAt })
-        .from(chatMessages)
-        .leftJoin(chatSessions, eq(chatSessions.id, chatMessages.sessionId))
-        .where(
-          and(
-            eq(chatSessions.leadId, lead.leadId),
-            eq(chatMessages.role, 'agent'),
-            sql`${chatMessages.createdAt} > ${lead.assignedAt}`,
-          ),
-        )
-        .orderBy(sql`${chatMessages.createdAt} DESC`)
-        .limit(1);
-
-      const lastReplyAt = lastAgentMsg[0]?.createdAt ?? lead.assignedAt;
-
-      // 5min 警告
-      if (lastReplyAt < since) {
-        warn5++;
-        this.logger.warn(
-          `[5min 警告] agent=${lead.assigneeId} lead=${lead.leadId} 客户=${lead.customerName ?? '匿名'} 城市=${lead.city} 分配后未回复`,
-        );
-      }
-
-      // 10min fallback
-      if (lastReplyAt < since10 && !lead.fallbackNotifiedAt) {
-        await this.db
-          .update(leads)
-          .set({
-            fallbackNotifiedAt: new Date(),
-            routingReason: `${lead.assigneeId ? '已分配' : '未分配'} → 10min 未回复,AI 自动回退`,
-          })
-          .where(eq(leads.id, lead.leadId));
-        fallback10++;
-        this.logger.error(
-          `[10min fallback] lead=${lead.leadId} agent=${lead.assigneeId} → 已发"客服繁忙"话术给客户`,
-        );
-      }
-
-      // 30min 升级销售主管
-      if (lastReplyAt < since30 && !lead.escalatedToSupervisor) {
-        await this.db
-          .update(leads)
-          .set({
-            escalatedToSupervisor: true,
-            supervisorNotifiedAt: new Date(),
-            routingReason: `30min 无回复,再次升级销售主管`,
-          })
-          .where(eq(leads.id, lead.leadId));
-        escalate30++;
-        this.logger.error(
-          `[30min 升级销售主管] lead=${lead.leadId} agent=${lead.assigneeId}`,
-        );
-      }
-    }
-
-    this.logger.log(
-      `超时监控完成: 5min 警告 ${warn5} 条 / 10min fallback ${fallback10} 条 / 30min 升级 ${escalate30} 条`,
-    );
-  }
-  // ====================================================
+  // 2026-08-28 旧 5/10/30 分钟无响应监控（routing_inactive_warn_5min）已废弃，
+  // 由新派单服务的超时自动转派（A/C1高=2分钟，B/C1普通=5分钟）覆盖。
 
   // ===== 2026-08-14 B 触达时间表 - 自动化触达 =====
   /**

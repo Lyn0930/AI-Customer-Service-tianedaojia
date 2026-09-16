@@ -14,6 +14,7 @@ import { map } from 'rxjs/operators';
 import { NeedLogin } from '@lark-apaas/fullstack-nestjs-core';
 import { ChatService } from './chat.service';
 import { ChatEventBus } from './chat-event-bus.service';
+import { ChatRequirementsService } from './chat-requirements.service';
 import type {
   ChatSessionListResponse,
   ChatSessionDetail,
@@ -22,10 +23,13 @@ import type {
   ChatMessage,
   ChatSession,
   SendMessageRequest,
+  ReassignSessionRequest,
   TransferRequest,
   ReplySuggestion,
   HandoffSummary,
   CollectionProgress,
+  FormSubmitRequest,
+  FormSubmitResponse,
 } from '@shared/api.interface';
 
 /**
@@ -36,6 +40,7 @@ export class ChatController {
   constructor(
     private readonly chatService: ChatService,
     private readonly chatEventBus: ChatEventBus,
+    private readonly chatRequirementsService: ChatRequirementsService,
   ) {}
 
   @Get('sessions')
@@ -108,6 +113,17 @@ export class ChatController {
   }
 
   @NeedLogin()
+  @Post('sessions/:id/reassign')
+  async reassignSession(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: ReassignSessionRequest,
+  ): Promise<ChatSession> {
+    const userId = (req as any).userContext?.userId;
+    return this.chatService.reassignSession(id, body.targetAgentId, userId);
+  }
+
+  @NeedLogin()
   @Post('sessions/:id/release')
   async releaseSession(
     @Req() req: Request,
@@ -156,6 +172,53 @@ export class ChatController {
   ): Promise<CollectionProgress> {
     return this.chatService.getCollectionProgress(id);
   }
+
+  /**
+   * 生成需求确认卡片（结构化文本，客服发给客户用）
+   * 2026-08-16 林琳 19:35 拍板：
+   *   - 必填项齐就能生成（前端按 canSend 控制按钮 enabled）
+   *   - 形态：结构化文本（每项一行"label：value"），客服可编辑后发送
+   *
+   * 返回：
+   *   - canSend: 必填项是否全齐
+   *   - text: 结构化文本（默认填到前端 textarea）
+   *   - fields: 字段详情（key/label/value/required/filled）
+   *   - missingRequired: 必填项未采的 label 列表
+   *   - serviceTypeLabel: 服务类型中文名
+   */
+  /**
+   * 2026-08-29 字段标准化 v2：存量需求数据批量归一化（一次性运维接口）
+   */
+  @NeedLogin()
+  @Post('requirements/normalize-legacy')
+  async normalizeLegacyRequirements(): Promise<{ total: number; updated: number }> {
+    return this.chatRequirementsService.normalizeExistingRequirements();
+  }
+
+  @NeedLogin()
+  @Post('sessions/:id/form-submit')
+  async submitForm(
+    @Param('id') id: string,
+    @Body() body: FormSubmitRequest,
+  ): Promise<FormSubmitResponse> {
+    return this.chatService.submitFormAndContinue(id, body);
+  }
+
+  @NeedLogin()
+  @Post('sessions/:id/confirmation-card')
+  async generateConfirmationCard(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ): Promise<{
+    canSend: boolean;
+    text: string;
+    fields: Array<{ key: string; label: string; value: string; required: boolean; filled: boolean }>;
+    missingRequired: string[];
+    serviceTypeLabel: string;
+  }> {
+    const userId = (req as any).userContext?.userId;
+    return this.chatService.generateConfirmationCard(id, userId);
+  }
 }
 
 /**
@@ -198,5 +261,13 @@ export class CustomerChatController {
   ): Promise<{ success: boolean }> {
     await this.chatService.transferToHuman(token, body.reason);
     return { success: true };
+  }
+
+  @Post(':token/form-submit')
+  async submitFormByToken(
+    @Param('token') token: string,
+    @Body() body: FormSubmitRequest,
+  ): Promise<FormSubmitResponse> {
+    return this.chatService.submitFormByToken(token, body);
   }
 }

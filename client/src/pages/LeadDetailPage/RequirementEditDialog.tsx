@@ -31,9 +31,7 @@ const FIELDS: FieldConfig[] = [
   { key: 'helperRequirements', label: '阿姨要求', type: 'textarea' },
   { key: 'dietaryPreferences', label: '口味偏好', type: 'textarea' },
   { key: 'budget', label: '预算', type: 'input' },
-  { key: 'serviceDuration', label: '服务周期', type: 'input' },
   { key: 'specialRequirements', label: '特殊需求', type: 'textarea' },
-  { key: 'familyInfo', label: '家庭情况', type: 'textarea' },
 ];
 
 interface RequirementEditDialogProps {

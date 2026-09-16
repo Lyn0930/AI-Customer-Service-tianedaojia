@@ -51,6 +51,10 @@ const WorkersPage: React.FC = () => {
     setLoading(true);
     try {
       const res = await getWorkers({ ...appliedFilters, page, pageSize });
+      if (!res || !Array.isArray(res.items)) {
+        toast.error('加载劳动者列表失败');
+        return;
+      }
       setWorkers(res.items);
       setTotal(res.total);
     } catch {

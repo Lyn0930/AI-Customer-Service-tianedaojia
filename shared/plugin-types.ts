@@ -76,19 +76,19 @@ export interface HouseholdServiceDemandExtractionOneOutput {
 
 // ---- plugin:swan_home_ai_customer_service_reply_1 ----
 // ============================================================
-// 插件 swan_home_ai_customer_service_reply_1 (天鹅到家金牌保姆推荐官智能对话回复) 的类型定义
+// 插件 swan_home_ai_customer_service_reply_1 (天鹅到家家政服务顾问智能对话回复) 的类型定义
 // 由 get_plugin_ai_json 自动生成
 // ============================================================
 
 export interface SwanHomeAiCustomerServiceReplyOneInput {
-  /** 已收集的客户需求信息 */
-  collected_requirements: string;
-  /** 客户最新发送的消息 */
-  latest_customer_message: string;
   /** 小书人设信息 */
   persona: string;
   /** 历史对话记录 */
   conversation_history: string;
+  /** 已收集的客户需求信息 */
+  collected_requirements: string;
+  /** 客户最新发送的消息 */
+  latest_customer_message: string;
 }
 
 /**
@@ -132,78 +132,34 @@ export interface SwanHomeConversationSummaryOneOutput {
 }
 // ---- end:swan_home_conversation_summary_1 ----
 
-// ---- plugin:swan_home_bitable_sync_1 ----
+// ---- plugin:customer_service_intent_classifier_1 ----
 // ============================================================
-// 插件 swan_home_bitable_sync_1 (天鹅到家线索数据同步飞书多维表格) 的类型定义
+// 插件 customer_service_intent_classifier_1 (意图分类器-L2) 的类型定义
 // 由 get_plugin_ai_json 自动生成
 // ============================================================
 
-export interface SwanHomeBitableSyncOneBatchaddrecordsInput {
-  /** [object Object] */
-  records: {
-    record: {
-
-    };
-  }[];
+export interface CustomerServiceIntentClassifierOneInput {
+  /** 最近几轮对话上下文，帮助理解歧义 */
+  conversation_context?: string;
+  /** 客户当前消息内容 */
+  customer_message: string;
 }
 
 /**
- * capabilityClient.load('swan_home_bitable_sync_1').call<SwanHomeBitableSyncOneBatchaddrecordsOutput>('batchAddRecords', input)
+ * capabilityClient.load('customer_service_intent_classifier_1').call<CustomerServiceIntentClassifierOneOutput>('textToJson', input)
  * 直接返回此类型，无 .data 包装，直接解构使用：
- * const { records } = result;
+ * const { intent, confidence, service_type, ... } = result;
  * 返回值形如：
- *   {"records":[{"id":"示例文本"}]}
+ *   {"intent":"示例文本","confidence":0,"service_type":"示例文本","key_phrase":"示例文本"}
  */
-export interface SwanHomeBitableSyncOneBatchaddrecordsOutput {
-  /** [object Object] */
-  records: {
-    id: string;
-  }[];
+export interface CustomerServiceIntentClassifierOneOutput {
+  /** 意图分类结果，只能是 transfer_human / market_price / service_scope / none 这 4 个值之一。中介费/服务费/信息费/介绍费由 L1 正则处理，一律输出 none；模糊钱问法（怎么收费/收费模式/费用多少）归 market_price，默认客户问总价，按总账答，不反问 */
+  intent: string;
+  /** 置信度 0~1，拿不准就给低分 */
+  confidence: number;
+  /** 识别出的服务类型。只填客户明确说出的 6 个标准枚举值（住家保姆/白班保姆/钟点工保姆/育儿保姆/护工保姆/菲式保姆）；客户用非标准说法（阿姨/保姆/育儿嫂/养老保姆/护工/带娃/照顾老人等）一律填空字符串，不自行归一；没有提到也填空字符串 */
+  service_type: string;
+  /** 客户原话中最能代表这个意图的关键词/短语，3~10 个字，用于自学习闭环聚合 */
+  key_phrase: string;
 }
-
-export interface SwanHomeBitableSyncOneSearchrecordsInput {
-  /** [object Object] */
-  fieldNames?: string[];
-  /** [object Object] */
-  sort?: {
-    fieldName: string;
-    desc: boolean;
-  }[];
-  /** [object Object] */
-  filter?: {
-    conjunction: string;
-    conditions: {
-      fieldName: string;
-      operator: string;
-      value: string[];
-    }[];
-  };
-  /** [object Object] */
-  pageToken?: string;
-  /** [object Object] */
-  pageSize?: number;
-}
-
-/**
- * capabilityClient.load('swan_home_bitable_sync_1').call<SwanHomeBitableSyncOneSearchrecordsOutput>('searchRecords', input)
- * 直接返回此类型，无 .data 包装，直接解构使用：
- * const { hasMore, pageToken, total, ... } = result;
- * 返回值形如：
- *   {"hasMore":false,"pageToken":"示例文本","total":0,"records":[{"id":"示例文本","record":{}}]}
- */
-export interface SwanHomeBitableSyncOneSearchrecordsOutput {
-  /** [object Object] */
-  hasMore: boolean;
-  /** [object Object] */
-  pageToken?: string;
-  /** [object Object] */
-  total?: number;
-  /** [object Object] */
-  records: {
-    id: string;
-    record: {
-
-    };
-  }[];
-}
-// ---- end:swan_home_bitable_sync_1 ----
+// ---- end:customer_service_intent_classifier_1 ----

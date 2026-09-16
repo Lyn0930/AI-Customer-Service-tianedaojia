@@ -79,6 +79,12 @@ const extractApiError = (err: unknown, fallback: string): string => {
       const firstLine = String(stack).split('\n').find((l) => l.trim().length > 0) || '';
       parts.push(`at: ${firstLine.slice(0, 200)}`);
     }
+    // 403 大概率是 CSRF 问题，附加诊断信息
+    if (status === 403) {
+      const hasToken = typeof window !== 'undefined' && !!(window as any).csrfToken;
+      const cookieHasToken = typeof document !== 'undefined' && document.cookie.includes('suda-csrf-token');
+      parts.push(`(CSRF诊断: window.csrfToken=${hasToken ? '有' : '无'}, cookie=${cookieHasToken ? '有' : '无'})`);
+    }
     return parts.join(' | ');
   }
   if (err && typeof err === 'object' && 'request' in err) {
@@ -118,11 +124,6 @@ const CollectLeadPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [chatToken, setChatToken] = useState<string>('');
 
-  // 短信验证码
-  const [smsCode, setSmsCode] = useState<string>('');
-  const [smsSending, setSmsSending] = useState<boolean>(false);
-  const [smsCountdown, setSmsCountdown] = useState<number>(0);
-
   // 当前定位
   const [detectedCity, setDetectedCity] = useState<ServiceCity | null>(null);
   const [locating, setLocating] = useState<boolean>(false);
@@ -139,23 +140,6 @@ const CollectLeadPage: React.FC = () => {
     }
   }, [group, serviceTypeOptions, serviceType]);
 
-  // 发送短信验证码（摆设模式：未接入短信服务，模拟成功 + 倒计时）
-  const handleSendSms = useCallback(async () => {
-    if (!isValidPhone(phoneNumber) || smsCountdown > 0 || smsSending) return;
-    setSmsSending(true);
-    setErrorMessage('');
-    // 模拟发送请求（400ms），不真调后端 sendSmsCode
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    setSmsCountdown(60);
-    setSmsSending(false);
-  }, [phoneNumber, smsCountdown, smsSending]);
-
-  // 验证码倒计时
-  useEffect(() => {
-    if (smsCountdown <= 0) return;
-    const timer = setTimeout(() => setSmsCountdown(smsCountdown - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [smsCountdown]);
 
   // 浏览器定位
   const requestLocation = useCallback(() => {
@@ -194,20 +178,17 @@ const CollectLeadPage: React.FC = () => {
     if (!isValidPhone(phoneNumber)) {
       return '请输入正确的 11 位手机号';
     }
-    if (!smsCode || smsCode.trim().length !== 6) {
-      return '请输入短信验证码';
-    }
     if (!agreed) {
       return '请先同意隐私协议';
     }
     return null;
-  }, [channel, group, serviceCity, serviceType, phoneNumber, smsCode, agreed]);
+  }, [channel, group, serviceCity, serviceType, phoneNumber, agreed]);
 
   // 缺参数 / 异常链接：直接展示错误
   if (!channel || !group) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-gradient-to-b from-blue-50 to-white p-6">
-        <div className="max-w-md w-full bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
+      <main className="fixed inset-0 overflow-y-auto flex bg-gradient-to-b from-blue-50 to-white p-6">
+        <div className="m-auto max-w-md w-full bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
           <h1 className="text-xl font-semibold text-gray-800 mb-2">链接无效</h1>
           <p className="text-sm text-gray-500">
             请确认使用了正确的渠道链接（应包含 <code className="px-1 bg-gray-100 rounded">channel</code> 与{' '}
@@ -233,7 +214,6 @@ const CollectLeadPage: React.FC = () => {
         source: CHANNEL_LABELS[channel],
         serviceTypeGroup: group,
         serviceType: serviceType as ServiceType,
-        smsCode,
         channel: (channel && ['openapi', 'bitable_form', 'chat', 'phone', 'manual'].includes(channel))
           ? channel as 'openapi' | 'bitable_form' | 'chat' | 'phone' | 'manual' : 'openapi',
       });
@@ -248,8 +228,8 @@ const CollectLeadPage: React.FC = () => {
   // 成功页
   if (submitStatus === 'success') {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-gradient-to-b from-blue-50 to-white p-6">
-        <div className="max-w-md w-full bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
+      <main className="fixed inset-0 overflow-y-auto flex bg-gradient-to-b from-blue-50 to-white p-6">
+        <div className="m-auto max-w-md w-full bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
           <div className="flex justify-center mb-4">
             <CheckCircle2 className="w-16 h-16 text-green-500" />
           </div>
@@ -279,8 +259,6 @@ const CollectLeadPage: React.FC = () => {
               setServiceCity('');
               setServiceType(serviceTypeOptions[0]?.value ?? '');
               setPhoneNumber('');
-              setSmsCode('');
-              setSmsCountdown(0);
               setAgreed(false);
               setErrorMessage('');
             }}
@@ -293,7 +271,7 @@ const CollectLeadPage: React.FC = () => {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-blue-50 to-white px-4 py-10">
+    <main className="fixed inset-0 overflow-y-auto bg-gradient-to-b from-blue-50 to-white px-4 py-10">
       <div className="max-w-md mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-8">
         {/* 保姆报价表（所有渠道共用）—— 作为 form 顶部门面 */}
         <Image
@@ -373,40 +351,6 @@ const CollectLeadPage: React.FC = () => {
               onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
               disabled={submitStatus === 'submitting'}
             />
-          </div>
-
-          {/* 短信验证码 */}
-          <div>
-            <Label htmlFor="smsCode" className="text-sm font-medium text-gray-700">
-              短信验证码 <span className="text-red-500">*</span>
-            </Label>
-            <div className="mt-1.5 flex items-center gap-2">
-              <Input
-                id="smsCode"
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="请输入 6 位验证码"
-                className="flex-1"
-                value={smsCode}
-                onChange={(e) => setSmsCode(e.target.value.replace(/\D/g, ''))}
-                disabled={submitStatus === 'submitting'}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="min-w-[110px] h-9"
-                onClick={handleSendSms}
-                disabled={submitStatus === 'submitting' || smsSending || smsCountdown > 0 || !isValidPhone(phoneNumber)}
-              >
-                {smsCountdown > 0
-                  ? `${smsCountdown}s 后重发`
-                  : smsSending
-                    ? '发送中...'
-                    : '发送验证码'}
-              </Button>
-            </div>
           </div>
 
           {/* 隐私授权 */}

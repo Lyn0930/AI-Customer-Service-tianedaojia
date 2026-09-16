@@ -1,0 +1,349 @@
+{
+  "paths": {
+    "/openapi/leads": {
+      "post": {
+        "operationId": "create",
+        "summary": "线索入库（外部推送）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["serviceCity", "phoneNumber"],
+                "properties": {
+                  "serviceCity": {
+                    "type": "string",
+                    "description": "服务城市（必填，例：北京/上海）",
+                    "example": "北京"
+                  },
+                  "phoneNumber": {
+                    "type": "string",
+                    "description": "手机号（必填，11 位数字）",
+                    "example": "13800138000"
+                  },
+                  "customerName": {
+                    "type": "string",
+                    "description": "客户姓名（非必填）",
+                    "example": "张先生"
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "推广渠道（非必填，例：小红书/抖音/SEO/美团/大众点评/自有APP/小程序）",
+                    "example": "小红书"
+                  },
+                  "serviceTypeGroup": {
+                    "type": "string",
+                    "enum": ["baomu", "yuesao"],
+                    "description": "服务类型组（非必填），baomu=保姆，yuesao=月嫂",
+                    "example": "baomu"
+                  },
+                  "serviceType": {
+                    "type": "string",
+                    "enum": ["zhujia", "yuer", "baiban", "yanglao", "26day_yuesao"],
+                    "description": "具体服务类型（非必填），住家保姆/育儿保姆/白班保姆/养老保姆/26天月嫂",
+                    "example": "zhujia"
+                  },
+                  "smsCode": {
+                    "type": "string",
+                    "description": "短信验证码（6 位数字）",
+                    "example": "123456"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功，返回线索完整信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "serviceCity", "phoneNumber", "source", "status", "chatToken", "createdAt", "updatedAt"],
+                  "properties": {
+                    "id": { "type": "string", "description": "线索 ID（UUID）", "example": "bf6654dc-6396-4da8-b7d5-84124f5ef5e8" },
+                    "serviceCity": { "type": "string", "description": "服务城市", "example": "北京" },
+                    "phoneNumber": { "type": "string", "description": "手机号", "example": "13800138000" },
+                    "customerName": { "type": "string", "nullable": true, "description": "客户姓名", "example": "张先生" },
+                    "source": { "type": "string", "enum": ["小红书", "抖音", "SEO", "美团", "大众点评", "自有APP", "小程序", "unknown"], "description": "推广渠道", "example": "小红书" },
+                    "status": { "type": "string", "enum": ["new", "contacting", "chatting", "collected", "closed"], "description": "线索状态", "example": "new" },
+                    "chatToken": { "type": "string", "description": "聊天会话 Token", "example": "2e6c8573-b610-4e77-8efe-a4cf775a7a72" },
+                    "assigneeId": { "type": "string", "nullable": true, "description": "分配客服 ID", "example": null },
+                    "bitableRecordId": { "type": "string", "nullable": true, "description": "多维表格记录 ID", "example": null },
+                    "createdAt": { "type": "string", "format": "date-time", "description": "创建时间", "example": "2026-08-10T09:08:05.029Z" },
+                    "updatedAt": { "type": "string", "format": "date-time", "description": "更新时间", "example": "2026-08-10T09:08:05.029Z" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi/sms/send": {
+      "post": {
+        "operationId": "sendSmsCode",
+        "summary": "发送短信验证码",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["phoneNumber"],
+                "properties": {
+                  "phoneNumber": {
+                    "type": "string",
+                    "description": "手机号（11 位数字）",
+                    "example": "13800138000"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "发送成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success"],
+                  "properties": {
+                    "success": { "type": "boolean", "description": "是否发送成功", "example": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi/captcha": {
+      "get": {
+        "operationId": "getCaptcha",
+        "summary": "获取图形验证码",
+        "responses": {
+          "200": {
+            "description": "返回图形验证码",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["key", "svg", "expiresAt"],
+                  "properties": {
+                    "key": { "type": "string", "description": "验证码 Key", "example": "abc123" },
+                    "svg": { "type": "string", "description": "SVG 内容", "example": "<svg>...</svg>" },
+                    "expiresAt": { "type": "string", "format": "date-time", "description": "过期时间", "example": "2026-08-10T09:08:05.029Z" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi/chat/{token}": {
+      "get": {
+        "operationId": "getCustomerChat",
+        "summary": "获取客户聊天会话与历史消息",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "聊天 Token（对应线索的 chatToken）",
+            "example": "2e6c8573-b610-4e77-8efe-a4cf775a7a72"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "返回会话信息与历史消息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["session", "messages"],
+                  "properties": {
+                    "session": {
+                      "type": "object",
+                      "description": "会话信息",
+                      "example": {
+                        "id": "sess_abc",
+                        "leadId": "lead_abc",
+                        "status": "active",
+                        "mode": "ai",
+                        "startedAt": "2026-08-10T09:08:05.029Z"
+                      }
+                    },
+                    "messages": {
+                      "type": "array",
+                      "description": "历史消息列表",
+                      "items": {
+                        "type": "object",
+                        "example": {
+                          "id": "msg_abc",
+                          "role": "bot",
+                          "content": "您好，我是小书~",
+                          "createdAt": "2026-08-10T09:08:05.029Z"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi/chat/{token}/messages": {
+      "get": {
+        "operationId": "getChatMessages",
+        "summary": "获取聊天消息列表",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "聊天 Token",
+            "example": "2e6c8573-b610-4e77-8efe-a4cf775a7a72"
+          },
+          {
+            "in": "query",
+            "name": "afterId",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "游标：返回该 ID 之后的新消息",
+            "example": "msg_abc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "消息列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "example": {
+                      "id": "msg_abc",
+                      "role": "bot",
+                      "content": "您好，我是小书~",
+                      "createdAt": "2026-08-10T09:08:05.029Z"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "sendChatMessage",
+        "summary": "客户发送聊天消息",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "聊天 Token",
+            "example": "2e6c8573-b610-4e77-8efe-a4cf775a7a72"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["content"],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "消息内容",
+                    "example": "我想找个住家保姆"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "发送成功，返回该条消息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "example": {
+                    "id": "msg_abc",
+                    "role": "customer",
+                    "content": "我想找个住家保姆",
+                    "createdAt": "2026-08-10T09:08:05.029Z"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi/chat/{token}/transfer": {
+      "post": {
+        "operationId": "transferToHuman",
+        "summary": "转人工客服",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "聊天 Token",
+            "example": "2e6c8573-b610-4e77-8efe-a4cf775a7a72"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "description": "转人工原因",
+                    "example": "客户主动申请"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "转人工成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success"],
+                  "properties": {
+                    "success": { "type": "boolean", "description": "是否成功", "example": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

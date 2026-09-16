@@ -14,13 +14,12 @@ import {
   CardTitle,
 } from '@client/src/components/ui/card';
 
-const TEXTAREA_CONFIGS = ['swan_persona', 'opening_message'];
+const TEXTAREA_CONFIGS = ['swan_persona'];
 const NUMBER_CONFIGS = ['extraction_interval', 'max_history_messages'];
 const JSON_CONFIGS = ['notification_receivers'];
 
 const CONFIG_LABELS: Record<string, string> = {
-  swan_persona: 'AI 人设提示词',
-  opening_message: '开场白消息',
+  swan_persona: 'AI 人设提示词（代码为事实源，每次部署自动覆盖，仅应急热修用）',
   extraction_interval: '需求提取间隔（轮）',
   max_history_messages: '对话历史最大条数',
   ai_reply_plugin_id: 'AI 对话回复插件 ID',

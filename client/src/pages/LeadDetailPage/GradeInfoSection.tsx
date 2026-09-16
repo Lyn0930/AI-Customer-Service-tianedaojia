@@ -24,17 +24,19 @@ import {
 const GRADE_STYLE: Record<string, string> = {
   A: 'bg-green-100 text-green-700 border-green-200',
   B: 'bg-blue-100 text-blue-700 border-blue-200',
-  C: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  D: 'bg-orange-100 text-orange-700 border-orange-200',
-  E: 'bg-gray-100 text-gray-500 border-gray-200',
+  B_PRICE: 'bg-orange-100 text-orange-700 border-orange-200',
+  C1: 'bg-purple-100 text-purple-700 border-purple-200',
+  C2: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  D: 'bg-gray-100 text-gray-500 border-gray-200',
 };
 
 const GRADE_LABEL: Record<string, string> = {
-  A: 'A级 高匹配',
-  B: 'B级 常规了解',
-  C: 'C级 仅咨询',
-  D: 'D级 待回收',
-  E: 'E级 无效',
+  A: 'A 优质线索',
+  B: 'B 普通线索',
+  B_PRICE: 'B-price 预算偏低（AI培育）',
+  C1: 'C1 客户主动转人工',
+  C2: 'C2 待采集',
+  D: 'D 无效/黑名单',
 };
 
 const TRIGGER_LABEL: Record<string, string> = {
@@ -57,7 +59,7 @@ interface GradeInfoSectionProps {
 const GradeInfoSection: React.FC<GradeInfoSectionProps> = ({ lead, onGradeUpdated }) => {
   const [history, setHistory] = useState<GradeHistory[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [regradeValue, setRegradeValue] = useState<LeadGrade>(lead.leadGrade as LeadGrade ?? 'C');
+  const [regradeValue, setRegradeValue] = useState<LeadGrade>(lead.leadGrade as LeadGrade ?? 'C2');
   const [regradeReason, setRegradeReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -104,7 +106,7 @@ const GradeInfoSection: React.FC<GradeInfoSectionProps> = ({ lead, onGradeUpdate
         <div className="flex items-center gap-2">
           {lead.leadGrade ? (
             <Badge variant="outline" className={GRADE_STYLE[lead.leadGrade] ?? ''}>
-              {lead.leadGrade}级
+              {GRADE_LABEL[lead.leadGrade] ?? lead.leadGrade}
             </Badge>
           ) : (
             <span className="text-sm text-gray-400">未评级</span>
@@ -120,7 +122,7 @@ const GradeInfoSection: React.FC<GradeInfoSectionProps> = ({ lead, onGradeUpdate
             size="sm"
             className="h-7 text-xs"
             onClick={() => {
-              setRegradeValue((lead.leadGrade as LeadGrade) ?? 'C');
+              setRegradeValue((lead.leadGrade as LeadGrade) ?? 'C2');
               setDialogOpen(true);
             }}
           >

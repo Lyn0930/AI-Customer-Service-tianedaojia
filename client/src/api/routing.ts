@@ -2,6 +2,7 @@ import { axiosForBackend } from '@lark-apaas/client-toolkit/utils/getAxiosForBac
 import type {
   AgentSkill,
   AgentWorkload,
+  AgentListResponse,
   CreateAgentSkillRequest,
   UpdateAgentSkillRequest,
   RoutingResult,
@@ -69,6 +70,14 @@ export async function sendHeartbeat(status: AgentOnlineState): Promise<void> {
     method: 'POST',
     data: { status },
   });
+}
+
+export async function getAgentList(): Promise<AgentListResponse> {
+  const res = await axiosForBackend({
+    url: '/api/agents',
+    method: 'GET',
+  });
+  return res.data;
 }
 
 export async function getOnlineAgents(): Promise<AgentOnlineStatus[]> {

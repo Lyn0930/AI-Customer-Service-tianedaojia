@@ -18,6 +18,7 @@ import type {
 import { getLeadById, getLeadRequirements } from '@client/src/api/leads';
 import GradeInfoSection from './GradeInfoSection';
 import { getSourceLabel } from '@shared/channels';
+import { formatHouseholdSize, formatArea, formatBudget } from '@client/src/utils/requirement-format';
 import { getContactLogs, createContactLog } from '@client/src/api/contact';
 import { Button } from '@client/src/components/ui/button';
 import { Input } from '@client/src/components/ui/input';
@@ -57,6 +58,11 @@ const LEAD_STATUS_MAP: Record<string, { label: string; className: string }> = {
   chatting: { label: '聊天中', className: 'bg-purple-100 text-purple-700 border-purple-200' },
   collected: { label: '已收集', className: 'bg-green-100 text-green-700 border-green-200' },
   closed: { label: '已关闭', className: 'bg-gray-100 text-gray-500 border-gray-200' },
+  nurturing: { label: '培育中', className: 'bg-orange-100 text-orange-700 border-orange-200' },
+  recycled: { label: '已回收', className: 'bg-gray-100 text-gray-600 border-gray-200' },
+  filtered: { label: '已过滤', className: 'bg-red-100 text-red-600 border-red-200' },
+  assigned: { label: '已分配', className: 'bg-cyan-100 text-cyan-700 border-cyan-200' },
+  pending: { label: '待分配', className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
 };
 
 const GRADE_STYLE: Record<string, string> = {
@@ -313,7 +319,10 @@ const LeadDetailPage: React.FC = () => {
     );
   }
 
-  const leadStatusCfg = LEAD_STATUS_MAP[lead.status];
+  const leadStatusCfg = LEAD_STATUS_MAP[lead.status] ?? {
+    label: lead.status,
+    className: 'bg-gray-100 text-gray-500 border-gray-200',
+  };
 
   return (
     <div className="p-6 space-y-4">
@@ -432,19 +441,18 @@ const LeadDetailPage: React.FC = () => {
               {requirement ? (
                 <div className="flex flex-col">
                   <InfoRow label="服务类型" value={requirement.serviceType} />
-                  <InfoRow label="家庭人口" value={requirement.householdSize} />
-                  <InfoRow label="面积" value={requirement.area} />
+                  <InfoRow label="家庭人口" value={formatHouseholdSize(requirement.householdSize)} />
+                  <InfoRow label="面积" value={formatArea(requirement.area)} />
                   <InfoRow label="老人照护" value={requirement.elderlyCare} />
                   <InfoRow label="休息天数" value={requirement.restDays} />
                   <InfoRow label="到岗时间" value={requirement.startTime} />
                   <InfoRow label="服务地址" value={requirement.serviceAddress} />
                   <InfoRow label="阿姨要求" value={requirement.helperRequirements} />
                   <InfoRow label="口味偏好" value={requirement.dietaryPreferences} />
-                  <InfoRow label="预算" value={requirement.budget} />
-                  <InfoRow label="预算范围" value={lead.budgetRange} />
-                  <InfoRow label="服务周期" value={lead.serviceDuration ?? requirement.serviceDuration} />
+                  <InfoRow label="预算" value={formatBudget(requirement.budget)} />
+                  <InfoRow label="服务周期" value={lead.serviceDuration} />
                   <InfoRow label="特殊需求" value={lead.specialRequirements ?? requirement.specialRequirements} />
-                  <InfoRow label="家庭情况" value={lead.familyInfo ?? requirement.familyInfo} />
+                  <InfoRow label="家庭情况" value={lead.familyInfo} />
                 </div>
               ) : (
                 <div className="py-8 text-center text-sm text-gray-400">

@@ -45,20 +45,21 @@ export class NotifyService {
       receiverUserList: receivers,
     };
 
-    try {
-      const result = await this.capabilityService
-        .load(PLUGIN_INSTANCE_ID)
-        .call(ACTION_KEY, input);
+    const sender = async () => {
+      try {
+        const result = await this.capabilityService
+          .load(PLUGIN_INSTANCE_ID)
+          .call(ACTION_KEY, input);
 
-      if (!result || !(result as { success?: boolean }).success) {
-        this.logger.warn(
-          `新线索通知发送失败，leadId: ${lead.id}`,
-        );
+        if (!result || !(result as { success?: boolean }).success) {
+          this.logger.warn(`新线索通知发送失败，leadId: ${lead.id}`);
+        }
+      } catch (error) {
+        const stack = error instanceof Error ? error.stack ?? error.message : String(error);
+        this.logger.warn(`新线索通知发送异常，leadId: ${lead.id}\n${stack}`);
       }
-    } catch (error) {
-      const stack = error instanceof Error ? error.stack ?? error.message : String(error);
-      this.logger.warn(`新线索通知发送异常，leadId: ${lead.id}\n${stack}`);
-    }
+    };
+    void sender();
   }
 
   /**
@@ -72,20 +73,21 @@ export class NotifyService {
       receiverUserList: receivers,
     };
 
-    try {
-      const result = await this.capabilityService
-        .load(PLUGIN_INSTANCE_ID)
-        .call(ACTION_KEY, input);
+    const sender = async () => {
+      try {
+        const result = await this.capabilityService
+          .load(PLUGIN_INSTANCE_ID)
+          .call(ACTION_KEY, input);
 
-      if (!result || !(result as { success?: boolean }).success) {
-        this.logger.warn(
-          `需求收集完成通知发送失败，leadId: ${leadId}`,
-        );
+        if (!result || !(result as { success?: boolean }).success) {
+          this.logger.warn(`需求收集完成通知发送失败，leadId: ${leadId}`);
+        }
+      } catch (error) {
+        const stack = error instanceof Error ? error.stack ?? error.message : String(error);
+        this.logger.warn(`需求收集完成通知发送异常，leadId: ${leadId}\n${stack}`);
       }
-    } catch (error) {
-      const stack = error instanceof Error ? error.stack ?? error.message : String(error);
-      this.logger.warn(`需求收集完成通知发送异常，leadId: ${leadId}\n${stack}`);
-    }
+    };
+    void sender();
   }
 
   /**
@@ -108,20 +110,21 @@ export class NotifyService {
       receiverUserList: receivers,
     };
 
-    try {
-      const result = await this.capabilityService
-        .load(PLUGIN_INSTANCE_ID)
-        .call(ACTION_KEY, input);
+    const sender = async () => {
+      try {
+        const result = await this.capabilityService
+          .load(PLUGIN_INSTANCE_ID)
+          .call(ACTION_KEY, input);
 
-      if (!result || !(result as { success?: boolean }).success) {
-        this.logger.warn(
-          `转人工通知发送失败，sessionId: ${sessionId}`,
-        );
+        if (!result || !(result as { success?: boolean }).success) {
+          this.logger.warn(`转人工通知发送失败，sessionId: ${sessionId}`);
+        }
+      } catch (error) {
+        const stack = error instanceof Error ? error.stack ?? error.message : String(error);
+        this.logger.warn(`转人工通知发送异常，sessionId: ${sessionId}\n${stack}`);
       }
-    } catch (error) {
-      const stack = error instanceof Error ? error.stack ?? error.message : String(error);
-      this.logger.warn(`转人工通知发送异常，sessionId: ${sessionId}\n${stack}`);
-    }
+    };
+    void sender();
   }
 
   /**

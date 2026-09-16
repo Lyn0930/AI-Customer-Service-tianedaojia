@@ -2,9 +2,11 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { DRIZZLE_DATABASE } from '@lark-apaas/fullstack-nestjs-core';
+import { SWAN_PERSONA } from '../chat/chat.prompt';
 
 /**
- * 一次性 schema 迁移：补齐 commit a994ed5 引入但未在数据库执行的 6 个 leads 列。
+ * 一次性 schema 迁移：补齐 commit a994ed5 引入但未在数据库执行的 6 个 leads 列 +
+ * 8/16 跨渠道归一（commit 2a71348）需要的 cross_channel_history 列和 idx_leads_phone_number 索引。
  *
  * 触发原因：dashboard /api/leads/stats 在 recentLeads 阶段抛 PostgreSQL 42703（列不存在）。
  * 根因：Drizzle schema 加了列但 release 未触发数据库同步；count(*) 子查询对列不敏感
@@ -18,34 +20,105 @@ import { DRIZZLE_DATABASE } from '@lark-apaas/fullstack-nestjs-core';
 export class SchemaMigrationService implements OnModuleInit {
   private readonly logger = new Logger(SchemaMigrationService.name);
 
-  private static readonly MIGRATION_MARKER = '[schema-migration:leads-routing-2026-08-14]';
+  private static readonly MIGRATION_MARKER = '[schema-migration:leads-cross-channel-2026-08-16]';
 
-  private static readonly EXPECTED_LEADS_COLUMNS: ReadonlyArray<{ name: string; ddl: string }> = [
+  // 2026-08-16 林琳 20:53 拍板·钟点工保姆 5+1 步分阶段采集：service_items / service_hours 两列
+  // - service_items: chip 5+1 选中的工作内容（做饭/洗衣/打扫卫生/买菜/接送孩子/自定义）
+  // 2026-08-22 林琳拍板：service_items / service_hours 从 collectedFields JSON 迁回独立列
+  //   走 IF NOT EXISTS 幂等 DDL，失败 catch + warn，不阻塞启动
+  private static readonly REQUIREMENTS_MIGRATION_MARKER = '[schema-migration:requirements-zhongdian-fields-2026-08-22]';
+
+  private static readonly EXPECTED_REQUIREMENTS_COLUMNS: ReadonlyArray<{
+    name: string;
+    ddl: string;
+    type: 'column';
+  }> = [
+    {
+      name: 'service_items',
+      ddl: 'ALTER TABLE requirements ADD COLUMN IF NOT EXISTS service_items text',
+      type: 'column',
+    },
+    {
+      name: 'service_hours',
+      ddl: 'ALTER TABLE requirements ADD COLUMN IF NOT EXISTS service_hours varchar(50)',
+      type: 'column',
+    },
+    {
+      // 2026-08-22 v1.1：新增 has_pet 字段（是否有宠物，影响阿姨匹配）
+      // - IF NOT EXISTS + fail-safe 模式，失败打 error 日志不阻塞业务
+      name: 'has_pet',
+      ddl: 'ALTER TABLE requirements ADD COLUMN IF NOT EXISTS has_pet varchar(100)',
+      type: 'column',
+    },
+  ];
+
+  private static readonly EXPECTED_LEADS_COLUMNS: ReadonlyArray<{
+    name: string;
+    ddl: string;
+    type: 'column' | 'index';
+  }> = [
+    // ===== 跨渠道归一 8/16（leads.service.mergeOrCreateByPhone 依赖） =====
+    {
+      name: 'cross_channel_history',
+      ddl: "ALTER TABLE leads ADD COLUMN IF NOT EXISTS cross_channel_history jsonb NOT NULL DEFAULT '[]'::jsonb",
+      type: 'column',
+    },
+    {
+      name: 'idx_leads_phone_number',
+      ddl: 'CREATE INDEX IF NOT EXISTS idx_leads_phone_number ON leads (phone_number)',
+      type: 'index',
+    },
+    // ===== 历史 6 列（commit a994ed5 8/14 routing） =====
     {
       name: 'pending_assignment_until',
       ddl: 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS pending_assignment_until timestamptz(3)',
+      type: 'column',
     },
     {
       name: 'routing_attempts',
       ddl: 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS routing_attempts integer NOT NULL DEFAULT 0',
+      type: 'column',
     },
     {
       name: 'last_routing_at',
       ddl: 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_routing_at timestamptz(3)',
+      type: 'column',
     },
     {
       name: 'escalated_to_supervisor',
       ddl: 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS escalated_to_supervisor boolean NOT NULL DEFAULT false',
+      type: 'column',
     },
     {
       name: 'supervisor_notified_at',
       ddl: 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS supervisor_notified_at timestamptz(3)',
+      type: 'column',
     },
     {
       name: 'fallback_notified_at',
       ddl: 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS fallback_notified_at timestamptz(3)',
+      type: 'column',
     },
-  ];
+    // 2026-08-25 v4 修复：leads 表加 service_type 列，供开场白 willPushFormCard 判断
+    // 渠道表单进来的 lead 必须有 serviceType，否则开场白走老模板（从头问服务类型）
+    {
+      name: 'service_type',
+      ddl: "ALTER TABLE leads ADD COLUMN IF NOT EXISTS service_type varchar(50) NOT NULL DEFAULT ''",
+      type: 'column',
+    },
+      ];
+
+  // ===== requirements 表 2026-08-16 钟点工 5+1 步分阶段采集 =====
+  // 2026-08-16 林琳 20:53 拍板：service_items / service_hours 改存到 collectedFields JSON，
+  //   **不再**新增列（原因：production DB user role 无 ALTER 权限，DDL 42501 失败 → INSERT 500）。
+  // private static readonly EXPECTED_REQUIREMENTS_COLUMNS: ReadonlyArray<{
+  //   name: string;
+  //   ddl: string;
+  //   type: 'column' | 'index';
+  // }> = [
+  //   { name: 'service_items', ddl: '...', type: 'column' },
+  //   { name: 'service_hours', ddl: '...', type: 'column' },
+  // ];
 
   /** 老 skillTag → 新 skillTag 映射。
    *  新版（钟点工保姆/白班保姆/育儿保姆/养老保姆/护工保姆/住家保姆/菲式保姆）上线后，
@@ -66,7 +139,12 @@ export class SchemaMigrationService implements OnModuleInit {
     '[schema-migration:agent-skills-tag-2026-08-14]';
   private skillDataMigrationCompleted = false;
 
+  private static readonly PERSONA_SYNC_MARKER =
+    '[persona-sync:swan-persona-2026-09-14]';
+  private personaSyncCompleted = false;
+
   private completed = false;
+  private requirementsColumnsCompleted = false;
 
   /** 最近一次 ensureLeadsRoutingColumns 的逐列尝试结果（暴露到 dashboard debug 面板）。 */
   public lastAttempt: Array<{ name: string; status: 'ok' | 'fail' | 'skip'; error?: string }> = [];
@@ -76,47 +154,80 @@ export class SchemaMigrationService implements OnModuleInit {
   ) {}
 
   /** Nest 启动钩子：自动跑 leads 列补齐 + skill_tag 数据迁移 + salary_config 表/列/seed。
-   *  in-memory 短路 flag 保证只跑一次；任意一步失败都不阻塞其它步骤与启动。 */
+   *  in-memory 短路 flag 保证只跑一次；任意一步失败都不阻塞其它步骤与启动。
+   *  8/16 备注：每次启动**重置**所有 completed 标志 — 解决 miaoda 平台 hot-reload 时
+   *  onModuleInit 不重跑、DDL 不生效的问题（即使代码改完部署，旧实例还卡在 completed=true）。
+   *  DDL 用 IF NOT EXISTS 幂等，重复跑安全；性能损耗在启动时一次性，可忽略。 */
   async onModuleInit(): Promise<void> {
+    this.completed = false;
+    this.skillDataMigrationCompleted = false;
+    this.salaryConfigMigrationCompleted = false;
+    this.personaSyncCompleted = false;
+    // 2026-08-22 林琳拍板：service_items / service_hours 从 JSON 迁回独立列
+    //   走 IF NOT EXISTS 幂等 DDL，失败 catch + warn，不阻塞启动
+    this.requirementsColumnsCompleted = false;
     await this.ensureLeadsRoutingColumns();
+    await this.ensureRequirementsZhongdianColumns();
     await this.ensureAgentSkillsTagMigration();
     await this.ensureSalaryConfigTableAndSeed();
+    await this.ensureSwanPersonaSynced();
   }
 
-  /** 幂等：仅第一次调用真正跑 ALTER；后续直接返回。失败不抛、不重试。 */
+  /** 幂等：每次调用都跑探测 + IF NOT EXISTS DDL；失败不抛、不重试。
+   *  8/16 修改：去掉 `if (this.completed) return;` 短路 —
+   *  解决 miaoda 平台 hot-reload 时即使部署新代码，进程不重启导致 completed flag 卡在 true、DDL 不跑的问题。
+   *  性能损耗：每次调用多 1 个 information_schema.columns SELECT + 1 个 pg_indexes SELECT +
+   *            N 个 ALTER/CREATE INDEX IF NOT EXISTS（DB 端快速判断 exists 跳过）。 */
   async ensureLeadsRoutingColumns(): Promise<void> {
-    if (this.completed) return;
     // 每次重试前清空，UI 面板只显示最近一次的结果
     this.lastAttempt = [];
 
     try {
-      const existing = await this.db.execute<{ column_name: string }>(
-        sql`SELECT column_name FROM information_schema.columns WHERE table_name = 'leads'`,
+      const total = SchemaMigrationService.EXPECTED_LEADS_COLUMNS.length;
+      const columns = SchemaMigrationService.EXPECTED_LEADS_COLUMNS.filter((c) => c.type === 'column');
+      const indexes = SchemaMigrationService.EXPECTED_LEADS_COLUMNS.filter((c) => c.type === 'index');
+
+      // 探测：列走 information_schema.columns，索引走 pg_indexes
+      const [columnResult, indexResult] = await Promise.all([
+        columns.length > 0
+          ? this.db.execute<{ column_name: string }>(
+              sql`SELECT column_name FROM information_schema.columns WHERE table_name = 'leads'`,
+            )
+          : Promise.resolve([]),
+        indexes.length > 0
+          ? this.db.execute<{ indexname: string }>(
+              sql`SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'leads'`,
+            )
+          : Promise.resolve([]),
+      ]);
+
+      const presentColumns = new Set(
+        (columnResult as unknown as { column_name: string }[]).map((r) => r.column_name),
       );
-      const present = new Set(
-        (existing as unknown as { column_name: string }[]).map((r) => r.column_name),
+      const presentIndexes = new Set(
+        (indexResult as unknown as { indexname: string }[]).map((r) => r.indexname),
       );
 
-      const missing = SchemaMigrationService.EXPECTED_LEADS_COLUMNS.filter(
-        (c) => !present.has(c.name),
-      );
-
+      const missing: Array<{ name: string; ddl: string; type: 'column' | 'index' }> = [];
       for (const col of SchemaMigrationService.EXPECTED_LEADS_COLUMNS) {
-        if (present.has(col.name)) {
+        const present = col.type === 'column' ? presentColumns.has(col.name) : presentIndexes.has(col.name);
+        if (present) {
           this.lastAttempt.push({ name: col.name, status: 'skip' });
+        } else {
+          missing.push(col);
         }
       }
 
       if (missing.length === 0) {
         this.logger.log(
-          `${SchemaMigrationService.MIGRATION_MARKER} 全部 ${SchemaMigrationService.EXPECTED_LEADS_COLUMNS.length} 列已存在，跳过迁移`,
+          `${SchemaMigrationService.MIGRATION_MARKER} 全部 ${total} 列/索引已存在，跳过迁移`,
         );
         this.completed = true;
         return;
       }
 
       this.logger.log(
-        `${SchemaMigrationService.MIGRATION_MARKER} 缺失 ${missing.length}/${SchemaMigrationService.EXPECTED_LEADS_COLUMNS.length} 列，开始 ALTER: ${missing
+        `${SchemaMigrationService.MIGRATION_MARKER} 缺失 ${missing.length}/${total} 列，开始迁移: ${missing
           .map((m) => m.name)
           .join(', ')}`,
       );
@@ -125,7 +236,13 @@ export class SchemaMigrationService implements OnModuleInit {
         try {
           await this.db.execute(sql.raw(col.ddl));
           this.lastAttempt.push({ name: col.name, status: 'ok' });
-          this.logger.log(`${SchemaMigrationService.MIGRATION_MARKER} ✓ ADD COLUMN ${col.name}`);
+          // 按类型输出对应成功 log（用户期望：「ALTER 成功: cross_channel_history」
+          // 和「CREATE INDEX 成功: idx_leads_phone_number」）
+          if (col.type === 'column') {
+            this.logger.log(`${SchemaMigrationService.MIGRATION_MARKER} ALTER 成功: ${col.name}`);
+          } else {
+            this.logger.log(`${SchemaMigrationService.MIGRATION_MARKER} CREATE INDEX 成功: ${col.name}`);
+          }
         } catch (err) {
           // 把整个 error 对象（message/name/code/cause/severity/detail/hint 等）全 dump 出来
           // ——postgres-js 不同版本错误形态不一样，err.cause / 顶层属性 / 字符串化都能命中。
@@ -440,6 +557,84 @@ export class SchemaMigrationService implements OnModuleInit {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`${marker} seed 失败（不阻塞）: ${message}`);
+    }
+  }
+
+  // ==================== requirements 表 2026-08-22 钟点工字段迁为独立列迁移 ====================
+  // 2026-08-22 林琳拍板：service_items / service_hours 从 collectedFields JSON 迁为独立列
+  //   走 IF NOT EXISTS 幂等 DDL，失败 catch + warn，不阻塞启动
+  async ensureRequirementsZhongdianColumns(): Promise<void> {
+    const marker = SchemaMigrationService.REQUIREMENTS_MIGRATION_MARKER;
+    try {
+      const total = SchemaMigrationService.EXPECTED_REQUIREMENTS_COLUMNS.length;
+
+      // 探测：走 information_schema.columns
+      const columnResult = await this.db.execute<{ column_name: string }>(
+        sql`SELECT column_name FROM information_schema.columns WHERE table_name = 'requirements'`,
+      );
+
+      const presentColumns = new Set(
+        (columnResult as unknown as { column_name: string }[]).map((r) => r.column_name),
+      );
+
+      const missing: Array<{ name: string; ddl: string }> = [];
+      for (const col of SchemaMigrationService.EXPECTED_REQUIREMENTS_COLUMNS) {
+        if (presentColumns.has(col.name)) {
+          this.logger.log(`${marker} 列已存在，跳过: ${col.name}`);
+        } else {
+          missing.push(col);
+        }
+      }
+
+      if (missing.length === 0) {
+        this.logger.log(`${marker} 全部 ${total} 列已存在，跳过迁移`);
+        this.requirementsColumnsCompleted = true;
+        return;
+      }
+
+      this.logger.log(
+        `${marker} 缺失 ${missing.length}/${total} 列，开始迁移: ${missing.map((m) => m.name).join(', ')}`,
+      );
+
+      for (const col of missing) {
+        try {
+          await this.db.execute(sql.raw(col.ddl));
+          this.logger.log(`${marker} ALTER 成功: ${col.name}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`${marker} ALTER 失败: ${col.name} — ${message}（不阻塞启动）`);
+        }
+      }
+
+      this.requirementsColumnsCompleted = true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`${marker} 迁移失败（不阻塞启动）: ${message}`);
+    }
+  }
+
+  // ==================== swan_persona 强制同步 ====================
+  /** 每次启动把代码里的 SWAN_PERSONA 强制 UPSERT 到 ai_configs 表（代码为唯一事实源）。
+   *  历史：旧实现按 v4 标记（"表单 + 对话混合采集"）探测跳过，代码后续新增段落不再同步，
+   *       DB 覆盖行停在旧版导致「费用口径兜底」等段运行时缺失（2026-09-14 排查确认并修复）。
+   *  语义：后台 AI 配置 tab 仍可临时改 swan_persona 作为热修通道，下次进程启动会被代码版覆盖。
+   *  幂等：ON CONFLICT 单语句；失败 catch + warn，不阻塞启动（getPersonaWithQa 无 DB 行时回退代码版）。 */
+  async ensureSwanPersonaSynced(): Promise<void> {
+    const marker = SchemaMigrationService.PERSONA_SYNC_MARKER;
+    try {
+      await this.db.execute(sql`
+        INSERT INTO ai_configs (config_key, config_value, config_type, description)
+        VALUES ('swan_persona', ${SWAN_PERSONA}, 'text', '天鹅到家 AI 客服 persona（代码为唯一事实源，每次部署自动覆盖）')
+        ON CONFLICT (config_key) DO UPDATE
+        SET config_value = EXCLUDED.config_value,
+            description = EXCLUDED.description,
+            _updated_at = CURRENT_TIMESTAMP
+      `);
+      this.logger.log(`${marker} swan_persona 已与代码版同步（强制覆盖）`);
+      this.personaSyncCompleted = true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`${marker} 失败（不阻塞启动）: ${message}`);
     }
   }
 }

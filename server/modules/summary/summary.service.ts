@@ -48,7 +48,11 @@ export class SummaryService {
         .from(leads)
         .where(eq(leads.id, sessionRows[0].leadId))
         .limit(1);
-      if (leadRows.length > 0 && leadRows[0].assigneeId !== userId) {
+      if (
+        leadRows.length > 0 &&
+        leadRows[0].assigneeId !== null &&
+        leadRows[0].assigneeId !== userId
+      ) {
         throw new ForbiddenException('无权操作此会话');
       }
     }

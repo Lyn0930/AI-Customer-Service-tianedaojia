@@ -5,3 +5,39 @@
 
 @source "../../node_modules/streamdown/dist/*.js";
 @config "../../tailwind.config.ts";
+
+/* 全局固定布局：消除页面级滚动条，只允许各区域内部滚动
+ * 注意：html/body/#root 只设 height:100%，不设 overflow:hidden
+ * 原因：Layout 之外的独立页面（如 /chat/:token 客户聊天页）用 h-screen，
+ *       全局 overflow:hidden 会导致内容被裁剪、页面空白。
+ *       后台页面的外层滚动条由 Layout 组件内部的 overflow-hidden 控制。
+ */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* 妙搭 AppContainer 外层容器也锁死高度 */
+#root > div,
+#root > div > div {
+  height: 100%;
+}
+
+/* 细滚动条统一样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}

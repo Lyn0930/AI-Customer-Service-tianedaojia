@@ -8,6 +8,7 @@ import {
   getChatSessionDetail,
   takeoverSession,
   releaseSession,
+  reassignSession,
   sendAgentMessage,
   getReplySuggestions,
 } from '@client/src/api/chat';
@@ -40,6 +41,10 @@ const ChatSessionsPage: React.FC = () => {
     setError(null);
     try {
       const res = await getChatSessions({ page: 1, pageSize: 50, all: isManager });
+      if (!res || !Array.isArray(res.items)) {
+        setError('加载会话列表失败');
+        return;
+      }
       setSessions(res.items);
       if (res.items.length > 0 && !selectedId) {
         setSelectedId(res.items[0].id);
@@ -144,6 +149,7 @@ const ChatSessionsPage: React.FC = () => {
     try {
       await takeoverSession(selectedId);
       toast.success('已接管会话');
+      fetchSessions();
       await fetchDetail(selectedId);
     } catch {
       toast.error('接管失败');
@@ -158,9 +164,25 @@ const ChatSessionsPage: React.FC = () => {
     try {
       await releaseSession(selectedId);
       toast.success('已释放回 AI');
+      fetchSessions();
       await fetchDetail(selectedId);
     } catch {
       toast.error('释放失败');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReassign = async (targetAgentId: string) => {
+    if (!selectedId) return;
+    setActionLoading(true);
+    try {
+      await reassignSession(selectedId, targetAgentId);
+      toast.success('已转接');
+      fetchSessions();
+      await fetchDetail(selectedId);
+    } catch {
+      toast.error('转接失败');
     } finally {
       setActionLoading(false);
     }
@@ -186,6 +208,9 @@ const ChatSessionsPage: React.FC = () => {
     try {
       const res = await getReplySuggestions(selectedId);
       setSuggestions(res.suggestions);
+      if (res.suggestions.length === 0) {
+        toast.info('AI 暂未生成建议，请稍后再试');
+      }
     } catch {
       toast.error('AI 建议获取失败');
     } finally {
@@ -225,7 +250,7 @@ const ChatSessionsPage: React.FC = () => {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="w-72 border-r border-gray-200 bg-white flex flex-col overflow-hidden shrink-0">
+        <div className="w-[280px] border-r border-gray-200 bg-white flex flex-col overflow-hidden shrink-0">
           <SessionList
             sessions={sessions}
             selectedId={selectedId}
@@ -246,12 +271,13 @@ const ChatSessionsPage: React.FC = () => {
             suggestionText={suggestionText}
             onTakeover={handleTakeover}
             onRelease={handleRelease}
+          onReassign={handleReassign}
             onSendAgentMessage={handleSendAgentMessage}
             onRequestSuggestions={handleRequestSuggestions}
           />
         </div>
 
-        <div className="w-80 border-l border-gray-200 bg-gray-50 shrink-0 overflow-hidden">
+        <div className="w-80 border-l border-gray-200 bg-white shrink-0 overflow-hidden">
           <ContextPanel
             sessionId={selectedId}
             isManager={isManager}

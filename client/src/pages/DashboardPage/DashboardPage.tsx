@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ListChecks, TrendingUp, UserPlus, MessageSquare } from 'lucide-react';
+import { RefreshCw, ListChecks, TrendingUp, UserPlus, MessageSquare, Clock, Zap, Target } from 'lucide-react';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import type { DashboardStats, Lead, LeadStatus } from '@shared/api.interface';
@@ -19,6 +19,8 @@ const STATUS_LABELS: Record<string, string> = {
   nurturing: '培育中',
   recycled: '已回收',
   filtered: '已过滤',
+  assigned: '已分配',
+  pending: '待分配',
 };
 
 const STATUS_BADGE_CLASS: Record<LeadStatus, string> = {
@@ -30,6 +32,8 @@ const STATUS_BADGE_CLASS: Record<LeadStatus, string> = {
   nurturing: 'bg-orange-100 text-orange-700 border-orange-200',
   recycled: 'bg-gray-100 text-gray-600 border-gray-200',
   filtered: 'bg-red-100 text-red-600 border-red-200',
+  assigned: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
 };
 
 /* 统计卡片配色 */
@@ -38,6 +42,34 @@ const STAT_ITEMS = [
   { key: 'todayNew', label: '今日新增', icon: TrendingUp, iconBg: 'bg-green-100', iconColor: 'text-green-600' },
   { key: 'unassigned', label: '待分配', icon: UserPlus, iconBg: 'bg-orange-100', iconColor: 'text-orange-600' },
   { key: 'activeSessions', label: '活跃会话', icon: MessageSquare, iconBg: 'bg-purple-100', iconColor: 'text-purple-600' },
+] as const;
+
+/* 效率指标卡片配色（近 7 天口径） */
+const EFFICIENCY_ITEMS = [
+  {
+    key: 'avgChatDuration',
+    label: '平均聊天时长',
+    icon: Clock,
+    iconBg: 'bg-cyan-100',
+    iconColor: 'text-cyan-600',
+    format: (v: number): string => (v >= 60 ? `${Math.round(v / 60)} 分钟` : `${v} 秒`),
+  },
+  {
+    key: 'avgCollectionDuration',
+    label: 'AI 采集耗时',
+    icon: Zap,
+    iconBg: 'bg-amber-100',
+    iconColor: 'text-amber-600',
+    format: (v: number): string => (v >= 60 ? `${Math.round(v / 60)} 分钟` : `${v} 秒`),
+  },
+  {
+    key: 'collectionCompletionRate',
+    label: '采集完成率',
+    icon: Target,
+    iconBg: 'bg-emerald-100',
+    iconColor: 'text-emerald-600',
+    format: (v: number): string => `${v}%`,
+  },
 ] as const;
 
 /* 图表配色（仅 hex） */
@@ -126,7 +158,7 @@ const buildCityBarOption = (
 
 interface StatCardProps {
   label: string;
-  value: number;
+  value: number | string;
   icon: React.ElementType;
   iconBg: string;
   iconColor: string;
@@ -272,6 +304,23 @@ const DashboardPage: React.FC = () => {
                 iconColor={item.iconColor}
               />
             ))}
+          </div>
+
+          {/* 效率指标卡片 */}
+          <div className="grid grid-cols-3 gap-4">
+            {EFFICIENCY_ITEMS.map((item) => {
+              const rawValue: number = stats ? Number(stats[item.key as keyof DashboardStats]) : 0;
+              return (
+                <StatCard
+                  key={item.key}
+                  label={item.label}
+                  value={item.format(rawValue)}
+                  icon={item.icon}
+                  iconBg={item.iconBg}
+                  iconColor={item.iconColor}
+                />
+              );
+            })}
           </div>
 
           {/* 图表区 */}

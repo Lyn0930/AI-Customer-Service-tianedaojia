@@ -9,22 +9,23 @@ import { LeadsService } from './leads.service';
 import { LeadGradingService } from './lead-grading.service';
 import { NotifyModule } from '../notify/notify.module';
 import { RoutingModule } from '../routing/routing.module';
-import { BitableSyncModule } from '../bitable-sync/bitable-sync.module';
 import { SmsModule } from '../sms/sms.module';
 import { AdminModule } from '../admin/admin.module';
 import { SchemaMigrationModule } from '../migration/schema-migration.module';
+import { AgentsModule } from '../agents/agents.module';
+import { RequirementDeltaService } from './requirement-delta.service';
 
 @Module({
   imports: [
     NotifyModule,
     forwardRef(() => RoutingModule),
-    BitableSyncModule,
     SmsModule,
     AdminModule,
     SchemaMigrationModule,
+    AgentsModule,
   ],
   controllers: [CaptchaController, LeadsController, LeadsOpenApiController, PublicLeadsController],
-  providers: [LeadsService, LeadGradingService],
-  exports: [LeadsService, LeadGradingService],
+  providers: [LeadsService, LeadGradingService, RequirementDeltaService],
+  exports: [LeadsService, LeadGradingService, RequirementDeltaService],
 })
 export class LeadsModule {}

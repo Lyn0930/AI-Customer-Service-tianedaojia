@@ -1,38 +1,34 @@
 import { Injectable, Inject, Logger, forwardRef } from '@nestjs/common';
 import { DRIZZLE_DATABASE, type PostgresJsDatabase } from '@lark-apaas/fullstack-nestjs-core';
-import { eq, desc } from 'drizzle-orm';
-import { leads, leadGradeHistory, requirements, chatMessages, chatSessions } from '@server/database/schema';
-import { RoutingService } from '../routing/routing.service';
+import { eq, desc, and } from 'drizzle-orm';
 import {
-  GRADE_E_KEYWORDS,
-  GRADE_A_KEYWORDS,
-  GRADE_RECOVERY_KEYWORDS,
-} from '../chat/chat.prompt';
+  leads, leadGradeHistory, requirements,
+  chatMessages, chatSessions, salaryConfig,
+} from '@server/database/schema';
+import { RoutingService } from '../routing/routing.service';
+import { GRADE_E_KEYWORDS } from '../chat/chat.prompt';
+import {
+  parseBudgetNumber, scoreUrgency, scoreClarity,
+  getCityTier, mapSalaryServiceType, HIGH_EMOTION_KEYWORDS,
+} from './lead-grading.util';
 import type { GradeHistory, GradeTransitionTrigger } from '@shared/api.interface';
 
-const VALID_GRADES = ['A', 'B', 'C', 'D', 'E'];
+const VALID_GRADES = ['A', 'B', 'B_PRICE', 'C1', 'C2', 'D'];
 
-/** 同一线索同目标等级在 5s 内的重复变更去重（防客户连发"不需要""不用了"导致的多次写入） */
 const GRADE_CHANGE_DEDUP_MS = 5_000;
-
-/** 上下文窗口：取最近 10 条对话作为跃迁判定依据 */
 const CONTEXT_WINDOW_SIZE = 10;
-
-/** 客户消息累计 < 2 条时不做 E 级降级（防止开场一句"不需要"就流失） */
-const MIN_CUSTOMER_MESSAGES_FOR_E = 2;
+const MIN_CUSTOMER_MESSAGES_FOR_D = 2;
 
 /**
- * 线索分级服务（2026-08-14 重构）
+ * 线索分级服务（2026-08-28 按 README 第八章重构为 6 档）
  *
- * 变更要点：
- * 1. 移除 AI 首次评级（swan_home_clue_grading_1）、CapabilityService 依赖
- * 2. 移除 E 关键词的 AI 语义二次确认（confirmGradeEByAI）
- * 3. 移除 3 天无响应 B→D 降级任务（downgradeStaleChatting）
- * 4. 关键词跃迁升级为 3 层防御：
- *    - 第一层：上一轮 bot 是否在问需求采集题（否定词是回答，不是流失）
- *    - 第二层：上下文窗口内是否仍有积极信号（还在找、还需、推荐等）
- *    - 第三层：客户消息累计数兜底（开场单条不流失）
- * 5. updateGrade 加入 5s 同 (leadId, targetGrade) 去重
+ * 档位：A（优质≥6分）/ B（<6分）/ B_PRICE（预算严重偏离，AI 培育）
+ *      C1（客户主动转人工，按情绪排序）/ C2（待采集）/ D（无效丢弃）
+ *
+ * A/B 判定代码化三维度（各 1-3 分）：
+ *   预算匹配度（查 salary_config 正常价/偏低价区间）
+ *   时间紧迫度（解析 start_time）
+ *   需求明确度（11 个采集字段有值比例）
  */
 @Injectable()
 export class LeadGradingService {
@@ -45,21 +41,16 @@ export class LeadGradingService {
     private readonly routingService: RoutingService,
   ) {}
 
-  /**
-   * 主动写入分级。带 5s 去重（同 leadId 同 newGrade 在 5s 内只生效一次）。
-   */
   async updateGrade(
     leadId: string,
     newGrade: string,
     reason: string,
     triggeredBy: GradeTransitionTrigger,
-    confidence?: number,
+    options?: { confidence?: number; leadScore?: number | null; urgencyLevel?: string | null },
   ): Promise<void> {
-    const cacheKey = leadId;
-    const cached = this.recentTransitions.get(cacheKey);
+    const cached = this.recentTransitions.get(leadId);
     const now = Date.now();
     if (cached && cached.grade === newGrade && now - cached.at < GRADE_CHANGE_DEDUP_MS) {
-      this.logger.debug(`5s 内重复分级跳过: lead=${leadId} target=${newGrade}`);
       return;
     }
 
@@ -67,21 +58,27 @@ export class LeadGradingService {
     if (!lead) return;
 
     const oldGrade = lead.leadGrade;
-    if (oldGrade === newGrade && confidence === undefined) {
-      this.recentTransitions.set(cacheKey, { grade: newGrade, at: now });
+    if (oldGrade === newGrade && !options) {
+      this.recentTransitions.set(leadId, { grade: newGrade, at: now });
       return;
     }
 
-    const updateData: Record<string, string> = {
+    const updateData: Record<string, unknown> = {
       leadGrade: newGrade,
       gradeReason: reason,
     };
-    if (confidence !== undefined) {
-      updateData.gradeConfidence = confidence.toString();
+    if (options?.confidence !== undefined) {
+      updateData.gradeConfidence = options.confidence.toString();
+    }
+    if (options?.leadScore !== undefined) {
+      updateData.leadScore = options.leadScore;
+    }
+    if (options?.urgencyLevel !== undefined) {
+      updateData.urgencyLevel = options.urgencyLevel;
     }
 
     await this.db.update(leads).set(updateData).where(eq(leads.id, leadId));
-    this.recentTransitions.set(cacheKey, { grade: newGrade, at: now });
+    this.recentTransitions.set(leadId, { grade: newGrade, at: now });
 
     if (oldGrade !== newGrade) {
       await this.db.insert(leadGradeHistory).values({
@@ -105,142 +102,153 @@ export class LeadGradingService {
   }
 
   /**
-   * 关键词跃迁检测（3 层防御版）
+   * 客户消息触发的分级检测：D 关键词（3 层豁免）+ 全量重算
    */
   async checkGradeTransition(leadId: string, userMessage: string): Promise<void> {
     const [lead] = await this.db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
-    if (!lead || !lead.leadGrade) return;
-    const currentGrade = lead.leadGrade;
+    if (!lead) return;
 
-    // === 第一层：上一轮 bot 是否在问需求采集题？ ===
-    const lastBotAskedRequirement = await this.checkIfAnsweringRequirementQuestion(lead.id);
-
-    // === 第二层：上下文窗口 ===
-    const recentContext = await this.getRecentContext(lead.id);
-
-    // === 第三层：E 关键词检测 ===
-    const eKeywordHit = this.detectEKeyword(userMessage);
-
-    // === E 级降级判定（多条件豁免） ===
-    if (eKeywordHit && currentGrade !== 'E') {
-      // 第一层豁免：客户在回答 bot 的需求采集题
-      if (lastBotAskedRequirement) {
-        this.logger.log(
-          `E关键词命中但豁免[第1层:需求采集上下文]: lead=${leadId} msg="${userMessage.slice(0, 30)}"`,
-        );
-        // 继续走到 B/C 升级判定（不要 return）
-      } else if (this.hasPositiveSignalInContext(recentContext)) {
-        // 第二层豁免：上下文窗口内仍存在积极信号
-        this.logger.log(
-          `E关键词命中但豁免[第2层:积极信号]: lead=${leadId} msg="${userMessage.slice(0, 30)}"`,
-        );
-      } else if (recentContext.customerCount < MIN_CUSTOMER_MESSAGES_FOR_E) {
-        // 第三层豁免：客户消息累计不足
-        this.logger.log(
-          `E关键词命中但豁免[第3层:消息累计不足]: lead=${leadId} count=${recentContext.customerCount}`,
-        );
-      } else {
-        await this.updateGrade(leadId, 'E', `E关键词命中: ${userMessage.slice(0, 50)}`, 'ai');
+    if (GRADE_E_KEYWORDS.some((kw) => userMessage.includes(kw)) && lead.leadGrade !== 'D') {
+      const lastBotAskedRequirement = await this.checkIfAnsweringRequirementQuestion(lead.id);
+      const recentContext = await this.getRecentContext(lead.id);
+      const exempted = lastBotAskedRequirement
+        || this.hasPositiveSignalInContext(recentContext)
+        || recentContext.customerCount < MIN_CUSTOMER_MESSAGES_FOR_D;
+      if (!exempted) {
+        await this.updateGrade(leadId, 'D', `无效关键词命中: ${userMessage.slice(0, 50)}`, 'ai');
         return;
       }
     }
 
-    // === D → B 恢复 ===
-    if (currentGrade === 'D') {
-      let recovered = false;
-      for (const kw of GRADE_RECOVERY_KEYWORDS) {
-        if (userMessage.includes(kw)) {
-          await this.updateGrade(leadId, 'B', '回收用户恢复响应，表达服务意向', 'ai');
-          recovered = true;
-          break;
-        }
-      }
-      if (recovered) return;
-      // 即便没命中关键词，只要不是 E 关键词 + 有积极信号，也升级
-      if (!eKeywordHit && this.hasPositiveSignalInContext(recentContext)) {
-        await this.updateGrade(leadId, 'B', '回收用户恢复响应', 'ai');
-        return;
-      }
-      return;
-    }
+    await this.recomputeGrade(leadId);
+  }
 
-    // === 拉取已采集需求 ===
+  /**
+   * 按 README 8.6 流程全量重算分级：
+   * D 保留 → 已转人工 C1（情绪分级）→ 已采集完 A/B/B_PRICE（三维度）→ 其余 C2
+   */
+  async recomputeGrade(leadId: string): Promise<void> {
+    const [lead] = await this.db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+    if (!lead) return;
+    if (lead.leadGrade === 'D' || lead.status === 'closed') return;
+
     const [req] = await this.db
       .select()
       .from(requirements)
       .where(eq(requirements.leadId, leadId))
       .limit(1);
-    const hasStartTime = !!req?.startTime;
-    const hasBudget = !!req?.budget;
-    const hasServiceType = !!req?.serviceType;
 
-    // === B → A 升级（用户主动询问匹配方案/急需服务） ===
-    if (currentGrade === 'B') {
-      const hasDetails = hasServiceType && (hasStartTime || hasBudget);
-      if (hasDetails) {
-        for (const kw of GRADE_A_KEYWORDS) {
-          if (userMessage.includes(kw)) {
-            await this.updateGrade(leadId, 'A', '用户主动询问匹配方案，急需服务', 'ai');
-            return;
-          }
+    const [humanSession] = await this.db
+      .select({ id: chatSessions.id })
+      .from(chatSessions)
+      .where(and(eq(chatSessions.leadId, leadId), eq(chatSessions.mode, 'human')))
+      .limit(1);
+
+    if (humanSession) {
+      const emotion = await this.detectEmotion(leadId);
+      await this.updateGrade(leadId, 'C1',
+        `客户主动转人工，AI情绪${emotion.level}${emotion.reason ? `：${emotion.reason}` : ''}`,
+        'system', {
+          urgencyLevel: emotion.level,
+        });
+      return;
+    }
+
+    if (lead.status === 'collected' && req?.serviceType) {
+      const salaryRows = await this.db
+        .select({ baseLow: salaryConfig.baseLow, altLow: salaryConfig.altLow })
+        .from(salaryConfig)
+        .where(and(
+          eq(salaryConfig.serviceType, mapSalaryServiceType(req.serviceType)),
+          eq(salaryConfig.cityTier, getCityTier(lead.serviceCity)),
+        ));
+
+      const budgetNum = parseBudgetNumber(req.budget);
+      let budgetScore: 1 | 2 | 3 = 2;
+      if (salaryRows.length > 0) {
+        const minBaseLow = Math.min(...salaryRows.map((r) => r.baseLow));
+        const minAltLow = Math.min(...salaryRows.map((r) => r.altLow));
+        if (budgetNum !== null && minAltLow > 0 && budgetNum < minAltLow) {
+          await this.updateGrade(leadId, 'B_PRICE',
+            `预算${budgetNum}低于偏低价下限${minAltLow}，AI培育不转人工`, 'system',
+            { leadScore: null });
+          return;
         }
+        budgetScore = budgetNum !== null && budgetNum >= minBaseLow ? 3 : 2;
       }
+
+      const urgencyScore = scoreUrgency(req.startTime);
+      const clarity = scoreClarity(req);
+      const total = budgetScore + urgencyScore + clarity.score;
+      const grade = total >= 6 ? 'A' : 'B';
+      await this.updateGrade(leadId, grade,
+        `预算${budgetScore}+紧迫${urgencyScore}+明确${clarity.score}(${clarity.filled}/11字段)=${total}分`,
+        'system', { leadScore: total });
+      return;
     }
 
-    // === C → B 升级（用户表达了具体需求） ===
-    if (currentGrade === 'C') {
-      if (hasStartTime || hasBudget) {
-        await this.updateGrade(leadId, 'B', '用户表达了具体需求（确定了服务时间/预算）', 'ai');
-        return;
-      }
-    }
+    await this.updateGrade(leadId, 'C2', 'AI未走完采集，继续采集', 'system');
   }
 
   /**
-   * 客户消息中是否包含 E 级关键词
+   * C1 情绪分级（README 8.3）：AI 分析客户最后 1-3 条消息的措辞语气，
+   * AI 调用失败时降级为关键词匹配，保证分级流程不阻塞。
    */
-  private detectEKeyword(text: string): boolean {
-    return GRADE_E_KEYWORDS.some((kw) => text.includes(kw));
+  private async detectEmotion(leadId: string): Promise<{ level: string; reason: string }> {
+    const rows = await this.db
+      .select({ content: chatMessages.content })
+      .from(chatMessages)
+      .innerJoin(chatSessions, eq(chatMessages.sessionId, chatSessions.id))
+      .where(and(eq(chatSessions.leadId, leadId), eq(chatMessages.role, 'customer')))
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(3);
+    const messages = rows.reverse().map((m) => m.content);
+    const content = messages.join('\n');
+
+    if (content.trim()) {
+      const aiResult = await this.routingService.classifyC1Emotion(content);
+      if (aiResult) {
+        return { level: aiResult.level, reason: aiResult.reason };
+      }
+      this.logger.warn(`线索 ${leadId} C1情绪 AI 判断失败，降级关键词匹配`);
+    }
+
+    const hit = messages.some((m) => HIGH_EMOTION_KEYWORDS.some((kw) => m.includes(kw)));
+    return {
+      level: hit ? 'high' : 'medium',
+      reason: hit ? '关键词命中愤怒/催促措辞' : '',
+    };
   }
 
-  /**
-   * 上下文窗口内的客户消息是否含积极信号（恢复/匹配/急需）
-   */
   private hasPositiveSignalInContext(ctx: { customerMessages: { content: string }[] }): boolean {
-    const POSITIVE = [...GRADE_RECOVERY_KEYWORDS, ...GRADE_A_KEYWORDS];
+    const POSITIVE = ['还需要', '还在找', '急需', '尽快', '匹配', '推荐', '想要', '打算'];
     return ctx.customerMessages.some((m) => POSITIVE.some((kw) => m.content.includes(kw)));
   }
 
-  /**
-   * 取最近 CONTEXT_WINDOW_SIZE 条对话，返回正序（最早在前）
-   */
   private async getRecentContext(leadId: string): Promise<{
-    all: { role: string; content: string; createdAt: Date }[];
     customerMessages: { content: string }[];
     customerCount: number;
   }> {
     const rows = await this.db
-      .select({
-        role: chatMessages.role,
-        content: chatMessages.content,
-        createdAt: chatMessages.createdAt,
-      })
+      .select({ role: chatMessages.role, content: chatMessages.content })
       .from(chatMessages)
       .innerJoin(chatSessions, eq(chatMessages.sessionId, chatSessions.id))
       .where(eq(chatSessions.leadId, leadId))
       .orderBy(desc(chatMessages.createdAt))
       .limit(CONTEXT_WINDOW_SIZE);
-    const all = rows.reverse();
-    const customerMessages = all.filter((m) => m.role === 'customer');
-    return { all, customerMessages, customerCount: customerMessages.length };
+    const customerMessages = rows.reverse().filter((m) => m.role === 'customer');
+    return { customerMessages, customerCount: customerMessages.length };
   }
 
-  /**
-   * 检查上一条 bot 消息是否在问需求采集类问题
-   * 命中 → 客户回复中的"不需要"等否定词是在回答问题，不应触发 E 级降级
-   */
   private async checkIfAnsweringRequirementQuestion(leadId: string): Promise<boolean> {
-    const lastBot = await this.getLastBotMessage(leadId);
+    const rows = await this.db
+      .select({ role: chatMessages.role, content: chatMessages.content })
+      .from(chatMessages)
+      .innerJoin(chatSessions, eq(chatMessages.sessionId, chatSessions.id))
+      .where(eq(chatSessions.leadId, leadId))
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(CONTEXT_WINDOW_SIZE);
+    const lastBot = rows.find((m) => m.role === 'bot');
     if (!lastBot) return false;
     const REQUIREMENT_QUESTION_KEYWORDS = [
       '老人', '照护', '陪护', '做饭', '口味', '面积', '多大', '几口',
@@ -249,21 +257,6 @@ export class LeadGradingService {
       '孩子', '宝宝', '预产期', '几号', '住家', '白班',
     ];
     return REQUIREMENT_QUESTION_KEYWORDS.some((kw) => lastBot.content.includes(kw));
-  }
-
-  private async getLastBotMessage(leadId: string): Promise<{ content: string } | null> {
-    const rows = await this.db
-      .select({
-        role: chatMessages.role,
-        content: chatMessages.content,
-        createdAt: chatMessages.createdAt,
-      })
-      .from(chatMessages)
-      .innerJoin(chatSessions, eq(chatMessages.sessionId, chatSessions.id))
-      .where(eq(chatSessions.leadId, leadId))
-      .orderBy(desc(chatMessages.createdAt))
-      .limit(CONTEXT_WINDOW_SIZE);
-    return rows.find((m) => m.role === 'bot') ?? null;
   }
 
   async getGradeHistory(leadId: string): Promise<GradeHistory[]> {
@@ -288,6 +281,6 @@ export class LeadGradingService {
     if (!VALID_GRADES.includes(grade)) {
       throw new Error(`无效的分级: ${grade}`);
     }
-    await this.updateGrade(leadId, grade, reason, 'manual', 1);
+    await this.updateGrade(leadId, grade, reason || '手动改级', 'manual', { confidence: 1 });
   }
 }

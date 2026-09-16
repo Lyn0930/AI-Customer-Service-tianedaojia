@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { Settings, MessageSquareText, BookOpen, Table2 } from 'lucide-react';
+import { Settings, MessageSquareText, BookOpen } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@client/src/components/ui/tabs';
 import QAKnowledgeTab from './QAKnowledgeTab';
 import TestChatTab from './TestChatTab';
 import AIConfigTab from './AIConfigTab';
-import BitableSyncTab from './BitableSyncTab';
 
 const AdminPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('qa');
@@ -36,10 +35,6 @@ const AdminPage: React.FC = () => {
               <Settings className="h-4 w-4" />
               AI 配置
             </TabsTrigger>
-            <TabsTrigger value="bitable" className="gap-1.5">
-              <Table2 className="h-4 w-4" />
-              多维表格
-            </TabsTrigger>
           </TabsList>
           <TabsContent value="qa" className="mt-4">
             <QAKnowledgeTab />
@@ -49,9 +44,6 @@ const AdminPage: React.FC = () => {
           </TabsContent>
           <TabsContent value="config" className="mt-4">
             <AIConfigTab />
-          </TabsContent>
-          <TabsContent value="bitable" className="mt-4">
-            <BitableSyncTab />
           </TabsContent>
         </Tabs>
       </div>

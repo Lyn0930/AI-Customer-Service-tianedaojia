@@ -9,7 +9,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { NeedLogin } from '@lark-apaas/fullstack-nestjs-core';
-import type { LeadStatus, PoolListParams, RegradeRequest } from '@shared/api.interface';
+import type { LeadStatus, PoolListParams, RegradeRequest, UpdateRequirementRequest } from '@shared/api.interface';
 import { LeadsService } from './leads.service';
 import { NotifyService } from '../notify/notify.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
@@ -73,9 +73,24 @@ export class LeadsController {
     return this.leadsService.recycleStaleLeads();
   }
 
+  @NeedLogin()
+  @Post('repair-grades')
+  async repairGrades() {
+    return this.leadsService.repairMissingGrades();
+  }
+
   @Get(':id/requirements')
   async getRequirements(@Param('id') id: string) {
     return this.leadsService.getRequirementsByLeadId(id);
+  }
+
+  @NeedLogin()
+  @Patch(':id/requirements')
+  async updateRequirements(
+    @Param('id') id: string,
+    @Body() body: UpdateRequirementRequest,
+  ) {
+    return this.leadsService.updateRequirement(id, body);
   }
 
   @NeedLogin()

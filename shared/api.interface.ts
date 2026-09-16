@@ -33,11 +33,11 @@ export type ServiceTypeGroup = 'baomu' | 'yuesao';
 // 服务类型：7 个具体值
 export type ServiceType = 'zhujia' | 'yuer' | 'baiban' | 'yanglao' | 'zhongdian' | 'feishi' | '26day_yuesao';
 
-export type LeadStatus = 'new' | 'contacting' | 'chatting' | 'collected' | 'closed' | 'nurturing' | 'recycled' | 'filtered';
+export type LeadStatus = 'new' | 'contacting' | 'chatting' | 'collected' | 'closed' | 'nurturing' | 'recycled' | 'filtered' | 'assigned' | 'pending';
 
 export type LeadChannel = 'openapi' | 'bitable_form' | 'chat' | 'phone' | 'manual';
 
-export type LeadGrade = 'A' | 'B' | 'C' | 'D' | 'E';
+export type LeadGrade = 'A' | 'B' | 'B_PRICE' | 'C1' | 'C2' | 'D';
 
 export type GradeTransitionTrigger = 'ai' | 'manual' | 'system';
 
@@ -68,6 +68,8 @@ export interface Lead {
   phoneVerified: boolean;
   leadSourceDetail: string | null;
   channel: LeadChannel;
+  /** 服务类型（中文：住家保姆/钟点工等），来自表单留资 */
+  serviceType?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -160,24 +162,6 @@ export interface SyncResult {
 
 /* ============ 城市客服分配相关 ============ */
 
-export interface CityAssignment {
-  id: string;
-  serviceCity: string;
-  assigneeId: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateCityAssignmentRequest {
-  serviceCity: string;
-  assigneeId: string;
-}
-
-export interface UpdateCityAssignmentRequest {
-  serviceCity?: string;
-  assigneeId?: string;
-}
-
 /* ============ 住家保姆等市场薪资区间配置 ============ */
 
 export type SalaryCityTier = '一线' | '二线' | '三线' | '二三线';
@@ -269,6 +253,11 @@ export interface ChatMessage {
   sessionId: string;
   role: ChatMessageRole;
   content: string;
+  type?: 'text' | 'form_card';
+  formCard?: {
+    serviceType: string;
+    formName: string;
+  };
   createdAt: string;
 }
 
@@ -293,10 +282,15 @@ export interface ChatSessionListResponse {
 export interface ChatSessionDetail extends ChatSession {
   messages: ChatMessage[];
   lead?: Lead;
+  requirement?: Requirement | null;
 }
 
 export interface SendMessageRequest {
   content: string;
+}
+
+export interface ReassignSessionRequest {
+  targetAgentId: string;
 }
 
 export interface CustomerChatInfo {
@@ -351,12 +345,13 @@ export interface Requirement {
   helperRequirements: string | null;
   dietaryPreferences: string | null;
   budget: string | null;
-  serviceDuration: string | null;
-  livingPreference: string | null;
   specialRequirements: string | null;
-  familyInfo: string | null;
-  workMode: string | null;
-  collectedFields: { field: string; value: string; label: string }[];
+  serviceItems: string | null;
+  serviceHours: string | null;
+  hasPet: string | null;
+  source: string | null;
+  cardSubmittedAt: string | null;
+  childCare: string | null;
   aiSummary: string | null;
   status: RequirementStatus;
   createdAt: string;
@@ -393,6 +388,12 @@ export interface DashboardStats {
   todayNew: number;
   unassigned: number;
   activeSessions: number;
+  /** 平均聊天时长（秒）：所有已转人工会话的 ended_at - started_at 平均值 */
+  avgChatDuration: number;
+  /** AI 采集耗时（秒）：transferReason='需求采集完成' 的会话平均时长 */
+  avgCollectionDuration: number;
+  /** 采集完成率（%）：需求采集完成转人工 / 所有转人工会话数 */
+  collectionCompletionRate: number;
   sourceDistribution: { source: string; count: number }[];
   statusDistribution: { status: string; count: number }[];
   cityDistribution: { city: string; count: number }[];
@@ -606,29 +607,6 @@ export interface AgentWorkload {
 
 export interface ConversationSummaryResponse {
   summary: string;
-}
-
-/* ============ 飞书多维表格同步 ============ */
-
-export interface BitableSyncStatus {
-  total: number;
-  synced: number;
-  unsynced: number;
-}
-
-export interface BitableSyncResult {
-  success: boolean;
-  message: string;
-  syncedCount?: number;
-}
-
-export interface BitableSyncLeadItem {
-  id: string;
-  customerName: string | null;
-  phoneNumber: string;
-  serviceCity: string;
-  bitableRecordId: string | null;
-  createdAt: string;
 }
 
 /* ============ 劳动者管理 ============ */
@@ -861,7 +839,127 @@ export interface UpdateRequirementRequest {
   helperRequirements?: string;
   dietaryPreferences?: string;
   budget?: string;
-  serviceDuration?: string;
   specialRequirements?: string;
-  familyInfo?: string;
+  hasPet?: string;
+  childCare?: string;
+  // 2026-08-16 21:35 林琳反馈 500 错误：serviceItems / serviceHours 改存到 collectedFields JSON
+  //   不再作为 requirements 顶层字段（production user role 无 ALTER 权限）
+  // 业务层通过 UpdateRequirementRequest.collectedFields 数组追加 serviceItems/serviceHours
+}
+
+export interface FormSubmitRequest {
+  householdSize: string;
+  area: string;
+  hasPet: string;
+  elderlyCare: string;
+  childCare: string;
+  restDays: string;
+  startTime: string;
+  serviceAddress: string;
+}
+
+export interface FormSubmitResponse {
+  success: boolean;
+  message: string;
+}
+
+// ============ 经纪人派单 ============
+
+export interface AgentRecord {
+  id: string;
+  name: string;
+  phone: string | null;
+  city: string;
+  serviceTypes: string[];
+  skillTags: string[];
+  conversionRate: number;
+  maxLeads: number;
+  activeLeadsCount: number;
+  isOnline: boolean;
+}
+
+export interface CreateAgentRequest {
+  name: string;
+  phone?: string;
+  city: string;
+  serviceTypes: string[];
+  skillTags?: string[];
+  conversionRate?: number;
+  maxLeads?: number;
+}
+
+export interface AgentListResponse {
+  items: AgentRecord[];
+  total: number;
+}
+
+export interface DispatchRunResponse {
+  reassignedCount: number;
+  assignedCount: number;
+}
+
+export interface SetAgentOnlineRequest {
+  online: boolean;
+  /** 下线时若仍有跟进中线索，前端二次确认后传 true 强制下线 */
+  force?: boolean;
+}
+
+export interface SetAgentOnlineResponse {
+  success: boolean;
+  /** 下线时命中跟进中线索且未强制确认，需前端弹确认框 */
+  needConfirm?: boolean;
+  activeLeadCount?: number;
+}
+
+// ============ AI 能力最小实测（阶段三 L2 前置验证测试页） ============
+
+export type AiTestKind = 'independent' | 'json_format' | 'enum_lock' | 'instruction' | 'budget_caliber' | 'swan_reply';
+
+export interface AiTestRequest {
+  test: AiTestKind;
+  input: string;
+}
+
+export interface AiTestResponse {
+  test: AiTestKind;
+  /** AI 原文返回（生文通道为原始文本；textToJson 通道为格式化 JSON 文本） */
+  raw: string;
+  /** 仅 AI 调用失败时非空 */
+  error?: string;
+  /** 本次调用实际使用的 system prompt */
+  systemPrompt: string;
+  /** 本次调用实际使用的用户消息 */
+  userMessage: string;
+  /** enum_lock：textToJson 返回的结构化对象 */
+  structured?: Record<string, unknown> | null;
+  /** enum_lock：平台能力核实说明 */
+  platformNote?: string;
+}
+
+export interface RouteTestRequest {
+  message: string;
+  /** 可选：模拟已采集的服务类型（影响报价类工具回复） */
+  serviceType?: string;
+}
+
+export interface RouteTestResponse {
+  handled: boolean;
+  intent: string | null;
+  reply: string;
+}
+
+export interface L2TestRequest {
+  message: string;
+  /** 可选：最近几轮对话上下文（帮助理解歧义） */
+  conversationContext?: string;
+}
+
+export interface L2TestResponse {
+  /** 是否高置信命中（阈值 0.7）；none / 低置信 / 解析失败均为 false（放行） */
+  hit: boolean;
+  /** 判定意图；放行时为 null */
+  intent: string | null;
+  confidence: number | null;
+  serviceType: string | null;
+  keyPhrase: string | null;
 }

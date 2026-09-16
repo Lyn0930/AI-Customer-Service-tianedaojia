@@ -1,7 +1,7 @@
 /* eslint-disable */
 /** auto generated, do not edit */
 import { sql } from 'drizzle-orm';
-import { boolean, foreignKey, index, integer, jsonb, numeric, pgTable, text, uniqueIndex, uuid, varchar, customType } from "drizzle-orm/pg-core"
+import { boolean, doublePrecision, foreignKey, index, integer, jsonb, numeric, pgSequence, pgTable, text, timestamp, uniqueIndex, uuid, varchar, customType } from "drizzle-orm/pg-core"
 
 export const customTimestamptz = customType<{
   data: Date;
@@ -117,6 +117,148 @@ export const fileAttachmentArray = customType<{
   },
 });
 
+export const intentDiscoveriesIdSeq = pgSequence("intent_discoveries_id_seq");
+
+export const requirementFieldDelta = pgTable("requirement_field_delta", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  leadId: varchar("lead_id", { length: 50 }).notNull(),
+  sessionId: varchar("session_id", { length: 50 }),
+  messageId: varchar("message_id", { length: 50 }),
+  fieldKey: varchar("field_key", { length: 50 }).notNull(),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  changeSource: varchar("change_source", { length: 30 }).notNull(),
+  // System field: Creation time (auto-filled, do not modify)
+  createdAt: customTimestamptz("_created_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Creator (auto-filled, do not modify)
+  createdBy: userProfile("_created_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+  // System field: Update time (auto-filled, do not modify)
+  updatedAt: customTimestamptz("_updated_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Updater (auto-filled, do not modify)
+  updatedBy: userProfile("_updated_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+}, (table) => [
+  index("idx_req_field_delta_lead").on(table.leadId, table.createdAt),
+]);
+
+export const faqs = pgTable("faqs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  topic: varchar("topic", { length: 100 }).notNull(),
+  triggerWords: text("trigger_words").array().notNull().default([]),
+  questionPattern: varchar("question_pattern", { length: 255 }),
+  answer: text("answer").notNull(),
+  category: varchar("category", { length: 20 }).notNull(),
+  priority: integer("priority").notNull().default(5),
+  hasLead: boolean("has_lead").notNull().default(false),
+  status: varchar("status", { length: 20 }).notNull().default('draft'),
+  // System field: Creation time (auto-filled, do not modify)
+  createdAt: customTimestamptz("_created_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Creator (auto-filled, do not modify)
+  createdBy: userProfile("_created_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+  // System field: Update time (auto-filled, do not modify)
+  updatedAt: customTimestamptz("_updated_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Updater (auto-filled, do not modify)
+  updatedBy: userProfile("_updated_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+});
+
+export const feeQuoteLogs = pgTable("fee_quote_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quotedAmount: integer("quoted_amount").notNull(),
+  aliasUsed: varchar("alias_used", { length: 50 }).notNull(),
+  aliasNormalized: varchar("alias_normalized", { length: 50 }).notNull(),
+  serviceType: varchar("service_type", { length: 100 }),
+  leadId: uuid("lead_id"),
+  sessionId: varchar("session_id", { length: 100 }),
+  intentSource: varchar("intent_source", { length: 20 }),
+  // System field: Creation time (auto-filled, do not modify)
+  createdAt: customTimestamptz("_created_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Creator (auto-filled, do not modify)
+  createdBy: userProfile("_created_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+  // System field: Update time (auto-filled, do not modify)
+  updatedAt: customTimestamptz("_updated_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Updater (auto-filled, do not modify)
+  updatedBy: userProfile("_updated_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+});
+
+export const intentDiscoveries = pgTable("intent_discoveries", {
+  id: integer("id").primaryKey().default(sql`nextval('intent_discoveries_id_seq'::regclass)`),
+  intent: varchar("intent", { length: 32 }).notNull(),
+  keyPhrase: varchar("key_phrase", { length: 200 }).notNull(),
+  messageContent: text("message_content").notNull(),
+  serviceType: varchar("service_type", { length: 64 }),
+  confidence: numeric("confidence").notNull(),
+  sessionId: varchar("session_id", { length: 64 }),
+  messageId: varchar("message_id", { length: 64 }),
+  status: varchar("status", { length: 16 }).notNull().default('pending'),
+  approvedKeyword: varchar("approved_keyword", { length: 200 }),
+  rejectedReason: varchar("rejected_reason", { length: 200 }),
+  createdAt: timestamp("created_at", { mode: 'string' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at", { mode: 'string' }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Creator (auto-filled, do not modify)
+  createdBy: userProfile("_created_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+  // System field: Updater (auto-filled, do not modify)
+  updatedBy: userProfile("_updated_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+}, (table) => [
+  index("idx_intent_discoveries_agg").on(table.intent, table.status, table.keyPhrase),
+  index("idx_intent_discoveries_created").on(table.createdAt),
+]);
+
+export const agentSessions = pgTable("agent_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agentId: uuid("agent_id").notNull(),
+  isOnline: boolean("is_online").notNull().default(false),
+  lastHeartbeatAt: customTimestamptz("last_heartbeat_at", { precision: 3 }),
+  // System field: Creation time (auto-filled, do not modify)
+  createdAt: customTimestamptz("_created_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Creator (auto-filled, do not modify)
+  createdBy: userProfile("_created_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+  // System field: Update time (auto-filled, do not modify)
+  updatedAt: customTimestamptz("_updated_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Updater (auto-filled, do not modify)
+  updatedBy: userProfile("_updated_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+}, (table) => [
+  index("idx_agent_sessions_agent_id").on(table.agentId),
+]);
+
+export const agents = pgTable("agents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 50 }).notNull(),
+  phone: varchar("phone", { length: 20 }),
+  city: varchar("city", { length: 50 }).notNull(),
+  /**
+   * @type string[]
+   */
+  serviceTypes: jsonb("service_types").notNull().default('[]'),
+  /**
+   * @type string[]
+   */
+  skillTags: jsonb("skill_tags").notNull().default('[]'),
+  conversionRate: doublePrecision("conversion_rate").notNull().default(50),
+  maxLeads: integer("max_leads").notNull().default(10),
+  activeLeadsCount: integer("active_leads_count").notNull().default(0),
+  // System field: Creation time (auto-filled, do not modify)
+  createdAt: customTimestamptz("_created_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Creator (auto-filled, do not modify)
+  createdBy: userProfile("_created_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+  // System field: Update time (auto-filled, do not modify)
+  updatedAt: customTimestamptz("_updated_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  // System field: Updater (auto-filled, do not modify)
+  updatedBy: userProfile("_updated_by").default(sql`CASE
+    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
+}, (table) => [
+  index("idx_agents_city").on(table.city),
+]);
+
 export const salaryConfig = pgTable("salary_config", {
   id: uuid("id").primaryKey().defaultRandom(),
   serviceType: varchar("service_type", { length: 50 }).notNull(),
@@ -212,8 +354,8 @@ export const agentOnlineStatus = pgTable("agent_online_status", {
 export const leadGradeHistory = pgTable("lead_grade_history", {
   id: uuid("id").primaryKey().defaultRandom(),
   leadId: uuid("lead_id").notNull(),
-  oldGrade: varchar("old_grade", { length: 2 }),
-  newGrade: varchar("new_grade", { length: 2 }).notNull(),
+  oldGrade: varchar("old_grade", { length: 10 }),
+  newGrade: varchar("new_grade", { length: 10 }).notNull(),
   reason: varchar("reason", { length: 200 }),
   triggeredBy: varchar("triggered_by", { length: 20 }).notNull().default('system'),
   // System field: Creation time (auto-filled, do not modify)
@@ -448,24 +590,6 @@ export const qaEntries = pgTable("qa_entries", {
   index("idx_qa_entries_enabled").on(table.enabled),
 ]);
 
-export const cityAssignments = pgTable("city_assignments", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  serviceCity: varchar("service_city", { length: 100 }).notNull(),
-  assigneeId: varchar("assignee_id", { length: 100 }).notNull(),
-  // System field: Creation time (auto-filled, do not modify)
-  createdAt: customTimestamptz("_created_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
-  // System field: Creator (auto-filled, do not modify)
-  createdBy: userProfile("_created_by").default(sql`CASE
-    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
-  // System field: Update time (auto-filled, do not modify)
-  updatedAt: customTimestamptz("_updated_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
-  // System field: Updater (auto-filled, do not modify)
-  updatedBy: userProfile("_updated_by").default(sql`CASE
-    WHEN (current_setting('app.user_id'::text, true) = ''::text) THEN NULL`),
-}, (table) => [
-  uniqueIndex("idx_city_assignments_city_agent").on(table.serviceCity, table.assigneeId),
-]);
-
 export const requirements = pgTable("requirements", {
   id: uuid("id").primaryKey().defaultRandom(),
   leadId: uuid("lead_id").notNull().unique(),
@@ -478,18 +602,24 @@ export const requirements = pgTable("requirements", {
   serviceAddress: text("service_address"),
   helperRequirements: text("helper_requirements"),
   dietaryPreferences: text("dietary_preferences"),
-  budget: varchar("budget", { length: 50 }),
+  budget: varchar("budget", { length: 100 }),
   status: varchar("status", { length: 20 }).notNull().default('collecting'),
-  serviceDuration: varchar("service_duration", { length: 50 }),
-  livingPreference: varchar("living_preference", { length: 20 }),
   specialRequirements: text("special_requirements"),
-  familyInfo: text("family_info"),
   /**
-   * @type { field: string, value: string, label: string }
+   * @type { field: string, value: string, label: string }[]
    */
   collectedFields: jsonb("collected_fields").default('[]'),
   aiSummary: text("ai_summary"),
-  workMode: text("work_mode"),
+  hasPet: varchar("has_pet", { length: 100 }),
+  serviceItems: text("service_items"),
+  serviceHours: varchar("service_hours", { length: 50 }),
+  source: text("source").default('chat'),
+  cardSubmittedAt: timestamp("card_submitted_at", { mode: 'string' }),
+  childCare: text("child_care"),
+  /**
+   * @type Record<string, { status: string, confidence: number, source: string | null }>
+   */
+  fieldMetadata: jsonb("field_metadata"),
   // System field: Creation time (auto-filled, do not modify)
   createdAt: customTimestamptz("_created_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
   // System field: Creator (auto-filled, do not modify)
@@ -602,7 +732,7 @@ export const leads = pgTable("leads", {
   lastFollowedUpAt: customTimestamptz("last_followed_up_at", { precision: 6 }),
   intent: varchar("intent", { length: 50 }),
   routingReason: varchar("routing_reason", { length: 200 }),
-  leadGrade: varchar("lead_grade", { length: 2 }),
+  leadGrade: varchar("lead_grade", { length: 10 }),
   leadScore: numeric("lead_score"),
   budgetRange: varchar("budget_range", { length: 50 }),
   serviceStartTime: varchar("service_start_time", { length: 100 }),
@@ -622,6 +752,11 @@ export const leads = pgTable("leads", {
   supervisorNotifiedAt: customTimestamptz("supervisor_notified_at", { precision: 3 }),
   fallbackNotifiedAt: customTimestamptz("fallback_notified_at", { precision: 3 }),
   crossChannelHistory: jsonb("cross_channel_history").notNull().default('[]'),
+  serviceType: varchar("service_type", { length: 50 }),
+  respondedAt: customTimestamptz("responded_at", { precision: 3 }),
+  assignmentStatus: varchar("assignment_status", { length: 20 }).notNull().default('pending'),
+  originalAgentId: varchar("original_agent_id", { length: 100 }),
+  pendingComfortAt: customTimestamptz("pending_comfort_at", { precision: 3 }),
   // System field: Creation time (auto-filled, do not modify)
   createdAt: customTimestamptz("_created_at", { precision: 3 }).notNull().default(sql`CURRENT_TIMESTAMP`),
   // System field: Creator (auto-filled, do not modify)
@@ -638,26 +773,32 @@ export const leads = pgTable("leads", {
   index("idx_leads_service_city").on(table.serviceCity),
   index("idx_leads_assignee_id").on(table.assigneeId),
   index("idx_leads_bitable_record_id").on(table.bitableRecordId),
-  index("idx_leads_lead_grade").on(table.leadGrade),
   index("idx_leads_urgency_level").on(table.urgencyLevel),
   index("idx_leads_channel").on(table.channel),
   index("idx_leads_phone_number").on(table.phoneNumber),
+  index("idx_leads_lead_grade").on(table.leadGrade),
+  index("idx_leads_assignment_status").on(table.assignmentStatus),
 ]);
 
 // table aliases
 export const agentOnlineStatusTable = agentOnlineStatus;
+export const agentSessionsTable = agentSessions;
 export const agentSkillsTable = agentSkills;
+export const agentsTable = agents;
 export const aiConfigsTable = aiConfigs;
 export const aiLearnedTemplatesTable = aiLearnedTemplates;
 export const aiTemplateUsageTable = aiTemplateUsage;
 export const chatMessagesTable = chatMessages;
 export const chatSessionsTable = chatSessions;
-export const cityAssignmentsTable = cityAssignments;
 export const contactLogsTable = contactLogs;
+export const faqsTable = faqs;
+export const feeQuoteLogsTable = feeQuoteLogs;
+export const intentDiscoveriesTable = intentDiscoveries;
 export const leadGradeHistoryTable = leadGradeHistory;
 export const leadsTable = leads;
 export const matchRecordsTable = matchRecords;
 export const qaEntriesTable = qaEntries;
+export const requirementFieldDeltaTable = requirementFieldDelta;
 export const requirementsTable = requirements;
 export const salaryConfigTable = salaryConfig;
 export const serviceOrdersTable = serviceOrders;

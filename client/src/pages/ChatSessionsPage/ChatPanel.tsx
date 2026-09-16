@@ -1,34 +1,48 @@
 import React, { useEffect, useRef, useState } from 'react';
-import dayjs from 'dayjs';
-import { Phone, MapPin, User, Headphones, Send, MessageSquare, Sparkles, Zap, Plus, Trash2, Settings2, X } from 'lucide-react';
+import {
+  Phone,
+  MapPin,
+  User,
+  Headphones,
+  Send,
+  MessageSquare,
+  Sparkles,
+  FileText,
+  AlertTriangle,
+  ArrowRightLeft,
+} from 'lucide-react';
 
 import { Button } from '@client/src/components/ui/button';
 import { Badge } from '@client/src/components/ui/badge';
-import { Input } from '@client/src/components/ui/input';
 import { Textarea } from '@client/src/components/ui/textarea';
 import { Spinner } from '@client/src/components/ui/spinner';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@client/src/components/ui/dropdown-menu';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@client/src/components/ui/popover';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from '@client/src/components/ui/dialog';
 import type {
   ChatSessionDetail,
   ChatMessage,
   ChatSessionStatus,
   ChatSessionMode,
+  AgentRecord,
+  AgentOnlineStatus,
 } from '@shared/api.interface';
 import { Image } from '@client/src/components/ui/image';
-import { useCurrentUserProfile } from '@lark-apaas/client-toolkit/hooks/useCurrentUserProfile';
-import { loadQuickReplies, saveQuickReplies } from './quickReplies';
+import { generateConfirmationCard, type ConfirmationCardResponse } from '@client/src/api/chat';
+import { getAgentList, getOnlineAgents } from '@client/src/api/routing';
+import { logger } from '@lark-apaas/client-toolkit/logger';
+import { formatRequirementFieldValue } from '@client/src/utils/requirement-format';
+import RequirementForm from './RequirementForm';
+import MessageBubble, { SWAN_AVATAR_URL, QuickReplyToolbar } from './ChatMessageBubble';
 
-const SWAN_AVATAR_URL = '/spark/app/app_17buybqcty0/runtime/api/v1/storage/object/bucket_aadkpgd7eesiq_static/static%2Faadkpw3e3oehg_ve_miaoda';
+const SECONDARY_BTN_CLASS =
+  'h-8 rounded-md px-3 text-[13px] bg-gray-100 text-gray-700 hover:bg-gray-200 border-0 shrink-0';
 
 const STATUS_MAP: Record<
   ChatSessionStatus,
@@ -36,78 +50,17 @@ const STATUS_MAP: Record<
 > = {
   active: {
     label: '进行中',
-    className: 'border-transparent bg-green-100 text-green-700',
+    className: 'border-transparent bg-[#DCFCE7] text-[#059669]',
   },
   completed: {
     label: '已结束',
-    className: 'border-transparent bg-gray-200 text-gray-600',
+    className: 'border-transparent bg-[#F3F4F6] text-gray-600',
   },
 };
 
 const MODE_MAP: Record<ChatSessionMode, { label: string; className: string }> = {
   ai: { label: 'AI 自动', className: 'bg-blue-100 text-blue-700' },
   human: { label: '人工接管', className: 'bg-orange-100 text-orange-700' },
-};
-
-const formatTime = (iso: string): string => {
-  const d = dayjs(iso);
-  const now = dayjs();
-  if (d.isSame(now, 'day')) return d.format('HH:mm');
-  if (d.isSame(now.subtract(1, 'day'), 'day'))
-    return `昨天 ${d.format('HH:mm')}`;
-  return d.format('MM-DD HH:mm');
-};
-
-interface MessageBubbleProps {
-  message: ChatMessage;
-}
-
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
-  const isBot = message.role === 'bot';
-  const isAgent = message.role === 'agent';
-  const isRight = isAgent;
-
-  return (
-    <div
-      className={`flex items-start gap-2 ${isRight ? 'justify-end' : 'justify-start'}`}
-    >
-      {!isRight && (
-        isBot ? (
-          <Image
-            src={SWAN_AVATAR_URL}
-            alt="小书"
-            className="w-8 h-8 rounded-full shrink-0 object-cover border-0 outline-none shadow-none bg-transparent"
-          />
-        ) : (
-          <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0">
-            <User className="w-4 h-4 text-gray-500" />
-          </div>
-        )
-      )}
-      <div className={`flex flex-col ${isRight ? 'items-end' : 'items-start'} max-w-[70%]`}>
-        {isAgent && (
-          <span className="text-xs text-green-600 mb-0.5">客服</span>
-        )}
-        <div
-          className={`rounded-lg px-3 py-2 text-sm break-words ${
-            isAgent
-              ? 'bg-primary text-primary-foreground'
-              : isBot
-                ? 'bg-gray-100 text-gray-800'
-                : 'bg-white border border-gray-200 text-gray-800'
-          }`}
-        >
-          {message.content}
-        </div>
-        <span className="text-xs text-gray-400 mt-1">{formatTime(message.createdAt)}</span>
-      </div>
-      {isRight && (
-        <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-          <Headphones className="w-4 h-4 text-green-600" />
-        </div>
-      )}
-    </div>
-  );
 };
 
 interface ChatPanelProps {
@@ -119,6 +72,7 @@ interface ChatPanelProps {
   suggestionText: string | null;
   onTakeover: () => void;
   onRelease: () => void;
+  onReassign: (targetAgentId: string) => void;
   onSendAgentMessage: (content: string) => void;
   onRequestSuggestions: () => void;
 }
@@ -132,6 +86,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   suggestionText,
   onTakeover,
   onRelease,
+  onReassign,
   onSendAgentMessage,
   onRequestSuggestions,
 }) => {
@@ -139,13 +94,18 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [inputText, setInputText] = useState('');
 
-  const userInfo = useCurrentUserProfile();
-  const userId = userInfo?.user_id;
-  const [quickReplies, setQuickReplies] = useState<string[]>([]);
-  const [manageOpen, setManageOpen] = useState(false);
-  const [newReplyDraft, setNewReplyDraft] = useState('');
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editingDraft, setEditingDraft] = useState('');
+  // 2026-08-16 19:35 林琳拍板：需求确认卡片
+  const [cardModalOpen, setCardModalOpen] = useState(false);
+  const [cardLoading, setCardLoading] = useState(false);
+  const [cardData, setCardData] = useState<ConfirmationCardResponse | null>(null);
+  const [cardText, setCardText] = useState('');
+
+  const [submittedFormIds, setSubmittedFormIds] = useState<Set<string>>(new Set());
+
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [reassignLoading, setReassignLoading] = useState(false);
+  const [onlineAgentOptions, setOnlineAgentOptions] = useState<AgentRecord[]>([]);
+  const [pickedAgentId, setPickedAgentId] = useState<string | null>(null);
 
   // 智能滚动：只在用户本来就停靠在底部时才跟随新消息；
   // 用户向上翻看历史时，新消息不会把视口拽回底部（不打断阅读、不影响输入）
@@ -167,15 +127,6 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }, [suggestionText]);
 
-  useEffect(() => {
-    setQuickReplies(loadQuickReplies(userId));
-  }, [userId]);
-
-  const persist = (next: string[]) => {
-    setQuickReplies(next);
-    saveQuickReplies(userId, next);
-  };
-
   const handleSend = () => {
     const text = inputText.trim();
     if (!text) return;
@@ -183,38 +134,62 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     setInputText('');
   };
 
+  // 2026-08-16 19:35 林琳拍板：生成需求确认卡片
+  const handleGenerateCard = async () => {
+    if (!detail?.id) return;
+    setCardLoading(true);
+    setCardModalOpen(true);
+    try {
+      const data = await generateConfirmationCard(detail.id);
+      setCardData(data);
+      setCardText(data.text);
+    } catch (err) {
+      logger.error('生成需求确认卡片失败', String(err));
+      setCardData(null);
+      setCardText('');
+    } finally {
+      setCardLoading(false);
+    }
+  };
+
+  const handleInsertCardToInput = () => {
+    const text = cardText.trim();
+    if (!text) return;
+    setInputText(text);
+    setCardModalOpen(false);
+  };
+
   const handlePickQuickReply = (content: string) => {
     setInputText(content);
   };
 
-  const handleDeleteQuickReply = (idx: number) => {
-    persist(quickReplies.filter((_, i) => i !== idx));
+  const handleOpenReassign = async () => {
+    setReassignOpen(true);
+    setPickedAgentId(null);
+    setReassignLoading(true);
+    try {
+      const [agentRes, online] = await Promise.all([getAgentList(), getOnlineAgents()]);
+      const onlineIds = new Set(online.map((o: AgentOnlineStatus) => o.assigneeId));
+      setOnlineAgentOptions(
+        agentRes.items.filter(
+          (a: AgentRecord) => onlineIds.has(a.id) && a.id !== detail?.lead?.assigneeId,
+        ),
+      );
+    } catch (err) {
+      logger.error('加载在线经纪人失败', String(err));
+      setOnlineAgentOptions([]);
+    } finally {
+      setReassignLoading(false);
+    }
   };
 
-  const handleAddQuickReply = () => {
-    const draft = newReplyDraft.trim();
-    if (!draft) return;
-    persist([...quickReplies, draft]);
-    setNewReplyDraft('');
+  const handleConfirmReassign = () => {
+    if (!pickedAgentId) return;
+    setReassignOpen(false);
+    onReassign(pickedAgentId);
   };
 
-  const handleStartEdit = (idx: number) => {
-    setEditingIndex(idx);
-    setEditingDraft(quickReplies[idx]);
-  };
-
-  const handleSaveEdit = () => {
-    if (editingIndex === null) return;
-    const draft = editingDraft.trim();
-    if (!draft) return;
-    const next = quickReplies.slice();
-    next[editingIndex] = draft;
-    persist(next);
-    setEditingIndex(null);
-    setEditingDraft('');
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -246,18 +221,29 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-2.5 border-b border-gray-200 bg-white">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="font-medium text-gray-900 text-sm">
-              {lead?.customerName ?? '未知客户'}
+      <div className="h-14 px-4 border-b border-[#E5E7EB] bg-white">
+        <div className="flex h-full items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-base font-bold text-[#111827] shrink-0">
+              {lead?.phoneNumber ?? '—'}
             </span>
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <span className="flex items-center gap-1">
-                <Phone className="w-3 h-3" />
-                {lead?.phoneNumber ?? '—'}
+            <div className="flex items-center gap-2 text-[13px] text-[#6B7280] min-w-0">
+              <span className="flex items-center gap-1 truncate">
+                <User className="w-3 h-3" />
+                {lead?.customerName ?? '未知客户'}
               </span>
-              <span className="flex items-center gap-1">
+              {detail.transferredBy ? (
+                <span
+                  className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
+                    detail.transferredBy === 'agent'
+                      ? 'bg-[#EFF6FF] text-[#2563EB]'
+                      : 'bg-[#FFF7ED] text-[#F59E0B]'
+                  }`}
+                >
+                  {detail.transferredBy === 'agent' ? '人工转接' : 'AI 转接'}
+                </span>
+              ) : null}
+              <span className="flex items-center gap-1 truncate">
                 <MapPin className="w-3 h-3" />
                 {lead?.serviceCity ?? '—'}
               </span>
@@ -268,20 +254,34 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             <Badge className={statusInfo.className}>{statusInfo.label}</Badge>
             {canOperate &&
               (isHumanMode ? (
+                <>
                 <Button
-                  variant="outline"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleOpenReassign}
+                  disabled={actionLoading}
+                  className="h-8 text-gray-700 hover:bg-gray-100"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  转接
+                </Button>
+                <Button
+                  variant="ghost"
                   size="sm"
                   onClick={onRelease}
                   disabled={actionLoading}
+                  className="h-8 text-gray-700 hover:bg-gray-100"
                 >
                   释放回 AI
                 </Button>
+                </>
               ) : (
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={onTakeover}
                   disabled={actionLoading}
+                  className="h-8 text-gray-700 hover:bg-gray-100"
                 >
                   <Headphones className="w-3.5 h-3.5" />
                   接管
@@ -294,190 +294,98 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50"
+        className="flex-1 overflow-y-auto px-4 py-3 space-y-4 bg-gray-50"
       >
-        {detail.messages.length === 0 ? (
+        {(detail.messages ?? []).length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">
             暂无聊天记录
           </div>
         ) : (
-          detail.messages.map((msg: ChatMessage) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))
+          detail.messages.map((msg: ChatMessage, index: number) => {
+            if (msg.type === 'form_card' && msg.formCard) {
+              const isSubmitted = submittedFormIds.has(msg.id) || Boolean(detail.requirement?.cardSubmittedAt);
+              return (
+                <div
+                  key={msg.id}
+                  className="flex items-start gap-2 justify-start"
+                  data-ai-section-type="card-form"
+                >
+                  <Image
+                    src={SWAN_AVATAR_URL}
+                    alt="小书"
+                    className="w-8 h-8 rounded-full shrink-0 object-cover border-0 outline-none shadow-none bg-transparent"
+                  />
+                  <RequirementForm
+                    sessionId={detail.id}
+                    serviceType={msg.formCard.serviceType}
+                    submitted={isSubmitted}
+                    onSubmitted={() =>
+                      setSubmittedFormIds((prev) => new Set(prev).add(msg.id))
+                    }
+                  />
+                </div>
+              );
+            }
+            return <MessageBubble key={msg.id} message={msg} />;
+          })
         )}
       </div>
 
       {canOperate && isHumanMode && (
-        <div className="px-4 py-2.5 border-t border-gray-200 bg-white">
-          <div className="flex items-center gap-2">
+        <>
+          <div className="h-10 px-4 border-t border-[#E5E7EB] bg-white flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={onRequestSuggestions}
               disabled={suggestionLoading}
-              className="shrink-0"
+              className={SECONDARY_BTN_CLASS}
             >
               <Sparkles className={`w-3.5 h-3.5 ${suggestionLoading ? 'animate-spin' : ''}`} />
               AI建议
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  title="插入常用语（填入输入框，可修改后发送）"
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                  常用语
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-80 max-h-96 overflow-y-auto">
-                {quickReplies.length === 0 ? (
-                  <div className="px-3 py-4 text-xs text-gray-400 text-center">
-                    还没有常用语，点右边的"管理"加一条
-                  </div>
-                ) : (
-                  quickReplies.map((content, idx) => (
-                    <DropdownMenuItem
-                      key={idx}
-                      onClick={() => handlePickQuickReply(content)}
-                      className="py-2"
-                    >
-                      <span className="text-sm whitespace-pre-wrap line-clamp-3">
-                        {content}
-                      </span>
-                    </DropdownMenuItem>
-                  ))
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Popover open={manageOpen} onOpenChange={setManageOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0 text-gray-500"
-                  title="管理我的常用语"
-                >
-                  <Settings2 className="w-3.5 h-3.5" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-96 p-0">
-                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                  <span className="text-sm font-medium">管理我的常用语</span>
-                  <button
-                    type="button"
-                    onClick={() => setManageOpen(false)}
-                    className="text-gray-400 hover:text-gray-600"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="px-4 py-3 max-h-80 overflow-y-auto space-y-2">
-                  {quickReplies.length === 0 ? (
-                    <div className="text-xs text-gray-400 text-center py-6">
-                      还没有常用语，在下方添加第一条
-                    </div>
-                  ) : (
-                    quickReplies.map((content, idx) =>
-                      editingIndex === idx ? (
-                        <div
-                          key={idx}
-                          className="border border-blue-200 rounded-md p-2 bg-blue-50"
-                        >
-                          <Textarea
-                            value={editingDraft}
-                            onChange={(e) => setEditingDraft(e.target.value)}
-                            className="min-h-[60px] text-sm"
-                          />
-                          <div className="flex justify-end gap-2 mt-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setEditingIndex(null);
-                                setEditingDraft('');
-                              }}
-                            >
-                              取消
-                            </Button>
-                            <Button size="sm" onClick={handleSaveEdit}>
-                              保存
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          key={idx}
-                          className="group flex items-start gap-2 p-2 border border-gray-200 rounded-md hover:border-gray-300"
-                        >
-                          <span className="flex-1 text-sm whitespace-pre-wrap">
-                            {content}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleStartEdit(idx)}
-                            className="text-xs text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                            title="编辑"
-                          >
-                            编辑
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteQuickReply(idx)}
-                            className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                            title="删除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ),
-                    )
-                  )}
-                </div>
-                <div className="px-4 py-3 border-t border-gray-200 space-y-2">
-                  <Textarea
-                    placeholder="新常用语内容（Enter 添加，Shift+Enter 换行）"
-                    value={newReplyDraft}
-                    onChange={(e) => setNewReplyDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAddQuickReply();
-                      }
-                    }}
-                    className="min-h-[60px] text-sm"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={handleAddQuickReply}
-                    disabled={!newReplyDraft.trim()}
-                    className="w-full"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    添加常用语
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-            <Input
-              placeholder="输入回复内容..."
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="flex-1"
-            />
+            <QuickReplyToolbar onPick={handlePickQuickReply} />
             <Button
               size="sm"
-              onClick={handleSend}
-              disabled={actionLoading || !inputText.trim()}
+              className="h-8 rounded-md px-3 text-[13px] shrink-0"
+              onClick={handleGenerateCard}
+              disabled={cardLoading || !detail?.id}
+              title="生成需求确认卡片（发给客户让他再次确认之前沟通的所有需求）"
             >
-              <Send className="w-4 h-4" />
-              发送
+              {cardLoading ? (
+                <Spinner className="w-3.5 h-3.5 mr-1" />
+              ) : (
+                <FileText className="w-3.5 h-3.5 mr-1" />
+              )}
+              生成确认卡片
             </Button>
           </div>
-        </div>
+          <div className="px-4 py-3 border-t border-[#E5E7EB] bg-white">
+            <div className="rounded-lg border border-[#E5E7EB] focus-within:border-[#2563EB] focus-within:ring-1 focus-within:ring-[#2563EB] transition-colors">
+              <Textarea
+                placeholder="输入消息..."
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="min-h-[72px] max-h-[200px] border-0 p-3 text-sm resize-none focus-visible:ring-0 focus-visible:ring-offset-0"
+              />
+              <div className="flex items-center justify-between px-3 pb-2">
+                <span className="text-xs text-gray-400">
+                  Enter 发送 · Shift+Enter 换行
+                </span>
+                <Button
+                  size="icon"
+                  onClick={handleSend}
+                  disabled={actionLoading || !inputText.trim()}
+                  title="发送"
+                  className="h-8 w-8 rounded-full bg-[#2563EB] text-white hover:bg-[#1D4ED8] disabled:bg-[#D1D5DB] disabled:cursor-not-allowed shrink-0"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {isManager && (
@@ -485,6 +393,169 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           管理者模式下为只读，无法操作会话
         </div>
       )}
+
+      {/* 2026-08-16 19:35 林琳拍板：需求确认卡片模态框（发给客户让他再次确认） */}
+      <Dialog open={cardModalOpen} onOpenChange={setCardModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-4 h-4" />
+              需求确认卡片
+              {cardData?.serviceTypeLabel && (
+                <Badge variant="secondary" className="ml-2 text-xs">
+                  {cardData.serviceTypeLabel}
+                </Badge>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              AI 基于已采集需求生成的结构化文本，客服可编辑后插入到输入框发送
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-3 py-2">
+            {cardLoading && (
+              <div className="text-center text-sm text-gray-500 py-8">
+                <Spinner className="w-5 h-5 mx-auto mb-2" />
+                正在生成...
+              </div>
+            )}
+
+            {!cardLoading && !cardData && (
+              <div className="text-center text-sm text-red-500 py-8">
+                生成失败，请稍后重试
+              </div>
+            )}
+
+            {!cardLoading && cardData && (
+              <>
+                {cardData.canSend ? (
+                  <div className="text-xs text-green-600 bg-green-50 px-3 py-2 rounded">
+                    ✓ 必填项已全部采集，可放心发给客户
+                  </div>
+                ) : (
+                  <div className="text-xs text-orange-700 bg-orange-50 px-3 py-2 rounded flex items-start gap-2">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <div>
+                      必填项未采：
+                      {(cardData.missingRequired ?? []).map((label, i) => (
+                        <span key={label} className="font-medium">
+                          {i > 0 && '、'}
+                          {label}
+                        </span>
+                      ))}
+                      <span className="block mt-1 text-orange-600">
+                        仍可发送（由客服判断是否需要先补采）
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="text-xs text-gray-500 mb-1.5">
+                    卡片内容（可编辑）：
+                  </div>
+                  <Textarea
+                    value={cardText}
+                    onChange={(e) => setCardText(e.target.value)}
+                    className="min-h-[260px] text-sm font-mono leading-relaxed"
+                    placeholder="卡片内容"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-xs text-gray-500 mb-1.5">
+                    字段预览（共 {(cardData.fields ?? []).length} 项）：
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(cardData.fields ?? []).map((f) => (
+                      <div
+                        key={f.key}
+                        className={`text-xs px-2 py-1.5 rounded border ${
+                          f.filled
+                            ? 'border-green-200 bg-green-50 text-green-800'
+                            : f.required
+                              ? 'border-orange-200 bg-orange-50 text-orange-800'
+                              : 'border-gray-200 bg-gray-50 text-gray-500'
+                        }`}
+                      >
+                        <div className="font-medium">
+                          {f.label}
+                          {f.required && <span className="text-red-500 ml-0.5">*</span>}
+                          {!f.filled && (
+                            <span className="ml-1 text-orange-600">（未提供）</span>
+                          )}
+                        </div>
+                        {f.filled && (
+                          <div className="truncate text-gray-700 mt-0.5">
+                            {formatRequirementFieldValue(f.key, f.value) ?? ''}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" size="sm">
+                取消
+              </Button>
+            </DialogClose>
+            <Button
+              size="sm"
+              onClick={handleInsertCardToInput}
+              disabled={!cardText.trim() || cardLoading}
+            >
+              插入到输入框
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reassignOpen} onOpenChange={setReassignOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>转接会话</DialogTitle>
+            <DialogDescription>选择一位在线经纪人接管当前会话</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-60 overflow-y-auto space-y-1.5">
+            {reassignLoading ? (
+              <div className="flex justify-center py-6">
+                <Spinner className="w-5 h-5 text-gray-400" />
+              </div>
+            ) : onlineAgentOptions.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-6">暂无其他在线经纪人</p>
+            ) : (
+              onlineAgentOptions.map((a: AgentRecord) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setPickedAgentId(a.id)}
+                  className={`w-full flex items-center justify-between rounded-md border px-3 py-2 text-sm ${
+                    pickedAgentId === a.id
+                      ? 'border-orange-400 bg-orange-50 text-orange-700'
+                      : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  <span>{a.name}</span>
+                  <span className="text-xs text-gray-400">{a.city || '--'}</span>
+                </button>
+              ))
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" size="sm">取消</Button>
+            </DialogClose>
+            <Button size="sm" disabled={!pickedAgentId || actionLoading} onClick={handleConfirmReassign}>
+              确认转接
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

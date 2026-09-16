@@ -1,15 +1,18 @@
 import { Injectable, Inject, Logger, NotFoundException, ConflictException, forwardRef } from '@nestjs/common';
 import { DRIZZLE_DATABASE, type PostgresJsDatabase, CapabilityService } from '@lark-apaas/fullstack-nestjs-core';
 import { eq, and, count, isNotNull, isNull, sql, inArray } from 'drizzle-orm';
-import { leads, agentSkills, cityAssignments, chatSessions, chatMessages, requirements, agentOnlineStatus, serviceOrders } from '@server/database/schema';
+import { leads, agentSkills, chatSessions, chatMessages, requirements, agentOnlineStatus, serviceOrders, agents } from '@server/database/schema';
 import { AiConfigService } from '../admin/ai-config.service';
 import { SchemaMigrationService } from '../migration/schema-migration.service';
 import { normalizeStream } from '../chat/stream-utils';
 import { ChatService } from '../chat/chat.service';
+import { AgentDispatchService } from '../agents/agent-dispatch.service';
+import { AgentSkillsSyncService } from '../agents/agent-skills-sync.service';
 import {
   AI_REPLY_PLUGIN_ID,
   AI_REPLY_ACTION_KEY,
   INTENT_CLASSIFICATION_PROMPT,
+  C1_EMOTION_PROMPT,
   SKILL_TAG_MAP,
   INTENT_SKILL_MAP,
 } from '../chat/chat.prompt';
@@ -40,15 +43,13 @@ const VALID_URGENCIES: UrgencyLevel[] = ['high', 'medium', 'low'];
 const ONLINE_TIMEOUT_MINUTES = 5;
 
 const GRADE_POOL_STATUS: Record<string, string> = {
-  C: 'nurturing',
-  D: 'recycled',
-  E: 'filtered',
+  B_PRICE: 'nurturing',
+  D: 'filtered',
 };
 
 const GRADE_POOL_LABEL: Record<string, string> = {
-  C: '培育池',
-  D: '回收池',
-  E: '过滤',
+  B_PRICE: '培育池',
+  D: '过滤',
 };
 
 @Injectable()
@@ -62,6 +63,8 @@ export class RoutingService {
     private readonly schemaMigration: SchemaMigrationService,
     @Inject(forwardRef(() => ChatService))
     private readonly chatService: ChatService,
+    private readonly agentDispatchService: AgentDispatchService,
+    private readonly agentSkillsSync: AgentSkillsSyncService,
   ) {}
 
   // ============ 意图分类 ============
@@ -77,8 +80,8 @@ export class RoutingService {
         .load(aiReplyPluginId)
         .callStream(AI_REPLY_ACTION_KEY, {
           persona: INTENT_CLASSIFICATION_PROMPT,
-          conversation_history: '',
-          collected_requirements: '',
+          conversation_history: '（无，仅根据本条消息分类）',
+          collected_requirements: '（无）',
           latest_customer_message: content,
         });
 
@@ -134,8 +137,66 @@ export class RoutingService {
     }
   }
 
+  // ============ C1 情绪分级 ============
+
+  async classifyC1Emotion(content: string): Promise<{ level: 'high' | 'medium'; reason: string } | null> {
+    let fullResponse = '';
+    try {
+      const aiReplyPluginId = await this.aiConfigService.getConfigWithDefault(
+        'ai_reply_plugin_id',
+        AI_REPLY_PLUGIN_ID,
+      );
+      const streamResult = await this.capabilityService
+        .load(aiReplyPluginId)
+        .callStream(AI_REPLY_ACTION_KEY, {
+          persona: C1_EMOTION_PROMPT,
+          conversation_history: '（无，仅根据本条消息判断）',
+          collected_requirements: '（无）',
+          latest_customer_message: content,
+        });
+
+      const stream = normalizeStream(streamResult);
+      for await (const chunk of stream) {
+        const chunkContent = (chunk as { content?: string }).content;
+        if (chunkContent) {
+          fullResponse += chunkContent;
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `C1情绪分类 AI 调用失败: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      return null;
+    }
+
+    return this.parseEmotionResponse(fullResponse);
+  }
+
+  private parseEmotionResponse(text: string): { level: 'high' | 'medium'; reason: string } | null {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      this.logger.warn(`C1情绪分类未匹配到 JSON: ${text.slice(0, 200)}`);
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as { emotion?: string; reason?: string };
+      if (parsed.emotion !== 'high' && parsed.emotion !== 'medium') {
+        this.logger.warn(`C1情绪分类非法 emotion: ${String(parsed.emotion)}`);
+        return null;
+      }
+      return { level: parsed.emotion, reason: parsed.reason ?? '' };
+    } catch {
+      this.logger.warn(`C1情绪分类 JSON 解析失败: ${text.slice(0, 200)}`);
+      return null;
+    }
+  }
+
   // ============ 路由分配 ============
 
+  /**
+   * @deprecated 2026-08-28 旧智能路由，已由 AgentDispatchService.assignLead 取代（转人工/采集完成/分级变更/转接四个入口均已切换）。保留仅供回滚，验证跑通后清理。
+   */
   async routeLead(leadId: string, firstMessage?: string): Promise<RoutingResult> {
     const leadRows = await this.db
       .select()
@@ -166,11 +227,29 @@ export class RoutingService {
       };
     }
 
+    if (grade === 'C2') {
+      const reason = 'C2级待采集，AI继续采集，不分配人工';
+      await this.db
+        .update(leads)
+        .set({ routingReason: reason })
+        .where(eq(leads.id, leadId));
+      return {
+        assigneeId: null,
+        intent: null,
+        urgency: null,
+        routingReason: reason,
+        autoTransferred: false,
+        priorityLevel: 'skip',
+      };
+    }
+
     const { skill: targetSkill, intent } = await this.determineSkill(leadId, lead, firstMessage);
-    const isPriority = grade === 'A';
+    const isPriority = grade === 'A'
+      || (grade === 'C1' && lead.urgencyLevel === 'high');
     return this.selectAndAssign(lead, targetSkill, intent, isPriority);
   }
 
+  /** @deprecated 同 routeLead，保留仅供回滚 */
   async reRouteLead(leadId: string): Promise<RoutingResult> {
     return this.routeLead(leadId);
   }
@@ -229,11 +308,9 @@ export class RoutingService {
       requirements: req
         ? {
             serviceType: req.serviceType,
-            familyInfo: req.familyInfo,
             elderlyCare: req.elderlyCare,
             householdSize: req.householdSize,
             restDays: req.restDays,
-            workMode: req.workMode,
             startTime: req.startTime,
             serviceAddress: req.serviceAddress,
             budget: req.budget,
@@ -297,11 +374,9 @@ export class RoutingService {
   private buildRequirementProgress(req: typeof requirements.$inferSelect | undefined) {
     const fields = [
       { field: 'serviceType', label: '服务类型', value: req?.serviceType, required: true },
-      { field: 'familyInfo', label: '家庭情况', value: req?.familyInfo, required: false },
       { field: 'householdSize', label: '房屋面积', value: req?.householdSize, required: false },
       { field: 'elderlyCare', label: '老人照护', value: req?.elderlyCare, required: false },
       { field: 'restDays', label: '休息天数', value: req?.restDays, required: true },
-      { field: 'workMode', label: '工作制', value: req?.workMode, required: false },
       { field: 'startTime', label: '到岗时间', value: req?.startTime, required: true },
       { field: 'serviceAddress', label: '服务地址', value: req?.serviceAddress, required: true },
       { field: 'helperRequirements', label: '阿姨要求', value: req?.helperRequirements, required: false },
@@ -347,11 +422,11 @@ export class RoutingService {
     this.logger.log(`线索 ${leadId} 分级变更: ${oldGrade ?? 'null'} → ${newGrade}`);
 
     if (newGrade === 'A') {
-      await this.assignWithPriority(leadId);
+      await this.agentDispatchService.assignLead(leadId, '分级升A派单');
       return;
     }
 
-    if (newGrade === 'B') {
+    if (newGrade === 'B' || newGrade === 'C1') {
       const [lead] = await this.db
         .select()
         .from(leads)
@@ -365,7 +440,7 @@ export class RoutingService {
             .set({ status: 'chatting' })
             .where(eq(leads.id, leadId));
         }
-        await this.routeLead(leadId);
+        await this.agentDispatchService.assignLead(leadId, '分级变更派单');
       } else if (['nurturing', 'recycled', 'filtered'].includes(lead.status)) {
         await this.db
           .update(leads)
@@ -375,22 +450,23 @@ export class RoutingService {
       return;
     }
 
+    if (newGrade === 'C2') {
+      return;
+    }
+
     const poolStatus = GRADE_POOL_STATUS[newGrade];
     if (poolStatus) {
       const label = GRADE_POOL_LABEL[newGrade];
-      await this.db
-        .update(leads)
-        .set({
-          status: poolStatus,
-          assigneeId: null,
-          assignedAt: null,
-          routingReason: `${newGrade}级线索进入${label}`,
-        })
-        .where(eq(leads.id, leadId));
+      await this.agentDispatchService.moveToPool(
+        leadId,
+        poolStatus,
+        `${newGrade}级线索进入${label}`,
+      );
       this.logger.log(`线索 ${leadId} 进入${label}`);
     }
   }
 
+  /** @deprecated 旧 A 级加权分配，已由新派单服务取代，保留仅供回滚 */
   async assignWithPriority(leadId: string): Promise<RoutingResult> {
     const leadRows = await this.db
       .select()
@@ -407,6 +483,7 @@ export class RoutingService {
     return this.selectAndAssign(lead, targetSkill, null, true);
   }
 
+  /** @deprecated 旧转人工加权分配，已由新派单服务取代，保留仅供回滚 */
   async assignForHuman(leadId: string, reason: string): Promise<RoutingResult> {
     const leadRows = await this.db
       .select()
@@ -656,7 +733,7 @@ export class RoutingService {
     let skillAgents = new Set<string>();
     if (targetSkill) {
       // 与 chat.prompt.ts SKILL_TAG_MAP / client AgentSkillsTab.SKILL_OPTIONS 保持一致
-      const BAOMU_SUBSKILLS = ['钟点工保姆', '白班保姆', '住家保姆', '育儿保姆', '养老保姆', '护工保姆', '菲式保姆'];
+      const BAOMU_SUBSKILLS = ['钟点工保姆', '白班保姆', '住家保姆', '育儿保姆', '护工保姆', '菲式保姆'];
       const querySkills = BAOMU_SUBSKILLS.includes(targetSkill)
         ? [targetSkill, '保姆']
         : [targetSkill];
@@ -668,10 +745,10 @@ export class RoutingService {
     }
 
     const cityRows = await this.db
-      .select({ assigneeId: cityAssignments.assigneeId })
-      .from(cityAssignments)
-      .where(eq(cityAssignments.serviceCity, lead.serviceCity));
-    const cityAgents = new Set(cityRows.map((r: { assigneeId: string }) => r.assigneeId));
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.city, lead.serviceCity));
+    const cityAgents = new Set(cityRows.map((r: { id: string }) => r.id));
 
     const candidates: string[] = [];
     const matchLevels = new Map<string, number>();
@@ -989,125 +1066,137 @@ export class RoutingService {
       .select()
       .from(agentSkills)
       .orderBy(agentSkills.assigneeId, agentSkills.skillTag);
+    return rows.map((r) => this.mapSkillRow(r));
+  }
 
-    return rows.map((r) => ({
+  async addAgentSkill(data: CreateAgentSkillRequest): Promise<AgentSkill> {
+    const agentRows = await this.db
+      .select({ id: agents.id, serviceTypes: agents.serviceTypes })
+      .from(agents)
+      .where(eq(agents.id, data.assigneeId))
+      .limit(1);
+    if (agentRows.length === 0) throw new NotFoundException('专员不存在');
+    const types: string[] = Array.isArray(agentRows[0].serviceTypes)
+      ? (agentRows[0].serviceTypes as string[])
+      : [];
+    if (types.includes(data.skillTag)) {
+      throw new ConflictException('该专员已拥有此技能');
+    }
+
+    await this.db
+      .update(agents)
+      .set({ serviceTypes: [...types, data.skillTag], updatedAt: new Date() })
+      .where(eq(agents.id, agentRows[0].id));
+    await this.agentSkillsSync.syncFromServiceTypes(agentRows[0].id);
+
+    return this.findSkillRow(agentRows[0].id, data.skillTag);
+  }
+
+  async updateAgentSkill(id: string, data: UpdateAgentSkillRequest): Promise<AgentSkill> {
+    const oldRows = await this.db
+      .select()
+      .from(agentSkills)
+      .where(eq(agentSkills.id, id))
+      .limit(1);
+    if (oldRows.length === 0) throw new NotFoundException('技能记录不存在');
+    const assigneeId = oldRows[0].assigneeId;
+    const oldTag = oldRows[0].skillTag;
+    if (oldTag === data.skillTag) return this.mapSkillRow(oldRows[0]);
+
+    const agentRows = await this.db
+      .select({ id: agents.id, serviceTypes: agents.serviceTypes })
+      .from(agents)
+      .where(eq(agents.id, assigneeId))
+      .limit(1);
+    if (agentRows.length === 0) throw new NotFoundException('专员不存在');
+    const types: string[] = Array.isArray(agentRows[0].serviceTypes)
+      ? (agentRows[0].serviceTypes as string[])
+      : [];
+    if (types.includes(data.skillTag)) {
+      throw new ConflictException('该专员已拥有此技能');
+    }
+    const next = types.includes(oldTag)
+      ? types.map((t: string) => (t === oldTag ? data.skillTag : t))
+      : [...types, data.skillTag];
+
+    await this.db
+      .update(agents)
+      .set({ serviceTypes: next, updatedAt: new Date() })
+      .where(eq(agents.id, assigneeId));
+    await this.agentSkillsSync.syncFromServiceTypes(assigneeId);
+
+    return this.findSkillRow(assigneeId, data.skillTag);
+  }
+
+  async removeAgentSkill(id: string): Promise<void> {
+    const oldRows = await this.db
+      .select()
+      .from(agentSkills)
+      .where(eq(agentSkills.id, id))
+      .limit(1);
+    if (oldRows.length === 0) throw new NotFoundException('技能记录不存在');
+    const assigneeId = oldRows[0].assigneeId;
+    const oldTag = oldRows[0].skillTag;
+
+    const agentRows = await this.db
+      .select({ id: agents.id, serviceTypes: agents.serviceTypes })
+      .from(agents)
+      .where(eq(agents.id, assigneeId))
+      .limit(1);
+    if (agentRows.length === 0) {
+      await this.db.delete(agentSkills).where(eq(agentSkills.id, id));
+      return;
+    }
+    const types: string[] = Array.isArray(agentRows[0].serviceTypes)
+      ? (agentRows[0].serviceTypes as string[])
+      : [];
+    await this.db
+      .update(agents)
+      .set({
+        serviceTypes: types.filter((t: string) => t !== oldTag),
+        updatedAt: new Date(),
+      })
+      .where(eq(agents.id, assigneeId));
+    await this.agentSkillsSync.syncFromServiceTypes(assigneeId);
+  }
+
+  private mapSkillRow(r: typeof agentSkills.$inferSelect): AgentSkill {
+    return {
       id: r.id,
       assigneeId: r.assigneeId,
       skillTag: r.skillTag,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
-    }));
-  }
-
-  async addAgentSkill(data: CreateAgentSkillRequest): Promise<AgentSkill> {
-    const existing = await this.db
-      .select({ id: agentSkills.id })
-      .from(agentSkills)
-      .where(
-        and(
-          eq(agentSkills.assigneeId, data.assigneeId),
-          eq(agentSkills.skillTag, data.skillTag),
-        ),
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
-      throw new ConflictException('该专员已拥有此技能');
-    }
-
-    const [row] = await this.db
-      .insert(agentSkills)
-      .values({
-        assigneeId: data.assigneeId,
-        skillTag: data.skillTag,
-      })
-      .returning();
-
-    return {
-      id: row.id,
-      assigneeId: row.assigneeId,
-      skillTag: row.skillTag,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
     };
   }
 
-  async updateAgentSkill(id: string, data: UpdateAgentSkillRequest): Promise<AgentSkill> {
-    const existing = await this.db
-      .select({ id: agentSkills.id, assigneeId: agentSkills.assigneeId })
-      .from(agentSkills)
-      .where(eq(agentSkills.id, id))
-      .limit(1);
-
-    if (existing.length === 0) {
-      throw new NotFoundException('技能记录不存在');
-    }
-
-    const assigneeId = existing[0].assigneeId;
-    const dup = await this.db
-      .select({ id: agentSkills.id })
+  private async findSkillRow(assigneeId: string, skillTag: string): Promise<AgentSkill> {
+    const rows = await this.db
+      .select()
       .from(agentSkills)
       .where(
         and(
           eq(agentSkills.assigneeId, assigneeId),
-          eq(agentSkills.skillTag, data.skillTag),
+          eq(agentSkills.skillTag, skillTag),
         ),
       )
       .limit(1);
-
-    if (dup.length > 0 && dup[0].id !== id) {
-      throw new ConflictException('该专员已拥有此技能');
-    }
-
-    const [row] = await this.db
-      .update(agentSkills)
-      .set({ skillTag: data.skillTag })
-      .where(eq(agentSkills.id, id))
-      .returning();
-
-    return {
-      id: row.id,
-      assigneeId: row.assigneeId,
-      skillTag: row.skillTag,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-    };
-  }
-
-  async removeAgentSkill(id: string): Promise<void> {
-    const deleted = await this.db
-      .delete(agentSkills)
-      .where(eq(agentSkills.id, id))
-      .returning({ id: agentSkills.id });
-
-    if (deleted.length === 0) {
-      throw new NotFoundException('技能记录不存在');
-    }
+    if (rows.length === 0) throw new NotFoundException('技能记录不存在');
+    return this.mapSkillRow(rows[0]);
   }
 
   async getAllAgentWorkloads(): Promise<AgentWorkload[]> {
-    const skillRows = await this.db
+    const agentRows = await this.db
       .select({
-        assigneeId: agentSkills.assigneeId,
-        skillTag: agentSkills.skillTag,
+        assigneeId: agents.id,
+        serviceTypes: agents.serviceTypes,
       })
-      .from(agentSkills);
+      .from(agents);
 
     const skillsMap = new Map<string, string[]>();
-    for (const r of skillRows) {
-      const existing = skillsMap.get(r.assigneeId) ?? [];
-      existing.push(r.skillTag);
-      skillsMap.set(r.assigneeId, existing);
-    }
-
-    const cityRows = await this.db
-      .selectDistinct({ assigneeId: cityAssignments.assigneeId })
-      .from(cityAssignments);
-    const allAgents = cityRows.map((r: { assigneeId: string }) => r.assigneeId);
-    for (const agentId of allAgents) {
-      if (!skillsMap.has(agentId)) {
-        skillsMap.set(agentId, []);
-      }
+    for (const r of agentRows) {
+      const types: string[] = Array.isArray(r.serviceTypes) ? (r.serviceTypes as string[]) : [];
+      skillsMap.set(r.assigneeId, types);
     }
 
     const chattingRows = await this.db

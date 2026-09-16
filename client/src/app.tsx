@@ -15,6 +15,7 @@ import CollectLeadPage from './pages/CollectLeadPage/CollectLeadPage';
 import AdminPage from './pages/AdminPage/AdminPage';
 import WorkersPage from './pages/WorkersPage/WorkersPage';
 import WorkerDetailPage from './pages/WorkersPage/WorkerDetailPage';
+import AiTestPage from './pages/AiTestPage/AiTestPage';
 import { useRole } from './hooks/useRole';
 
 const RoleGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -44,6 +45,7 @@ const RoutesComponent = () => {
         <Route path="admin" element={<AdminPage />} />
         <Route path="workers" element={<WorkersPage />} />
         <Route path="workers/:id" element={<WorkerDetailPage />} />
+        <Route path="ai-test" element={<AiTestPage />} />
       </Route>
       <Route path="chat/:token" element={<CustomerChatPage />} />
       {/* 公开线索收集入口：6 渠道 × 2 服务类型组 = 12 个 URL 变体 */}

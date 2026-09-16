@@ -1,10 +1,9 @@
 export * as leadsApi from './leads';
 export * as contactApi from './contact';
 export * as chatApi from './chat';
-export * as assignmentApi from './assignment';
 export * as statsApi from './stats';
 export * as adminApi from './admin';
 export * as routingApi from './routing';
 export * as summaryApi from './summary';
-export * as bitableSyncApi from './bitable-sync';
 export * as workersApi from './workers';
+export * as aiTestApi from './ai-test';
