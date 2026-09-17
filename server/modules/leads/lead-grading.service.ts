@@ -253,7 +253,7 @@ export class LeadGradingService {
     const REQUIREMENT_QUESTION_KEYWORDS = [
       '老人', '照护', '陪护', '做饭', '口味', '面积', '多大', '几口',
       '月休', '休息', '到岗', '什么时候', '地址', '哪个区', '街道',
-      '预算', '薪资', '多少', '要求', '特殊要求', '保洁', '频次',
+      '预算', '薪资', '多少', '要求', '特殊要求',
       '孩子', '宝宝', '预产期', '几号', '住家', '白班',
     ];
     return REQUIREMENT_QUESTION_KEYWORDS.some((kw) => lastBot.content.includes(kw));

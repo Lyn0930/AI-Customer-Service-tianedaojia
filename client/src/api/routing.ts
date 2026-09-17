@@ -56,14 +56,6 @@ export async function getAgentWorkloads(): Promise<AgentWorkload[]> {
   return res.data;
 }
 
-export async function reRouteLead(leadId: string): Promise<RoutingResult> {
-  const res = await axiosForBackend({
-    url: `/api/leads/${leadId}/re-route`,
-    method: 'POST',
-  });
-  return res.data;
-}
-
 export async function sendHeartbeat(status: AgentOnlineState): Promise<void> {
   await axiosForBackend({
     url: '/api/agent/heartbeat',

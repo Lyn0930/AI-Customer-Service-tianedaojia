@@ -35,7 +35,7 @@ export class NotifyService {
   /**
    * 通知运营人员：新线索接入
    * @param lead 新创建的线索
-   * @param serviceType 服务类型（可选，钟点工/白班/住家/育儿/护工/菲式/月嫂）
+   * @param serviceType 服务类型（可选，钟点工/白班/住家/育儿/护工/菲式）
    */
   async notifyNewLead(lead: Lead, serviceType?: string): Promise<void> {
     const receivers = await this.getReceivers();

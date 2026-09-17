@@ -130,10 +130,9 @@ const CollectLeadPage: React.FC = () => {
 
   const serviceTypeOptions = group ? getServiceTypeOptions(group) : [];
 
-  // 动态标题（2026-08-10 用户反馈:保姆/月嫂用不同标题）
-  const formTitle = group === 'yuesao' ? '找月嫂' : '找保姆';
+  const formTitle = '找保姆';
 
-  // group 自动选中第一个 serviceType（仅月嫂组有 1 个）
+  // group 自动选中第一个 serviceType
   useEffect(() => {
     if (group && serviceTypeOptions.length > 0 && !serviceType) {
       setServiceType(serviceTypeOptions[0].value);
@@ -314,13 +313,7 @@ const CollectLeadPage: React.FC = () => {
             <Label htmlFor="serviceType" className="text-sm font-medium text-gray-700">
               服务类型 <span className="text-red-500">*</span>
             </Label>
-            {group === 'yuesao' ? (
-              // 月嫂组只有 1 个选项，直接展示
-              <div className="mt-1.5 px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-700">
-                26天月嫂
-              </div>
-            ) : (
-              <Select value={serviceType} onValueChange={setServiceType}>
+            <Select value={serviceType} onValueChange={setServiceType}>
                 <SelectTrigger id="serviceType" className="mt-1.5 w-full" disabled={submitStatus === 'submitting'}>
                   <SelectValue placeholder="请选择服务类型" />
                 </SelectTrigger>
@@ -332,7 +325,6 @@ const CollectLeadPage: React.FC = () => {
                   ))}
                 </SelectContent>
               </Select>
-            )}
           </div>
 
           {/* 手机号 */}

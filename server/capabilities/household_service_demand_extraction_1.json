@@ -23,17 +23,17 @@
       "maxTokens": 8192,
       "temperature": 0.5
     },
-    "prompt": "你是一位家政客服质检员。请根据下面这段\"雇主-小书\"对话历史，抽取结构化需求。\n\n【输入】\n{{input.conversation_text}}\n\n【抽取字段】（字段全为 string，未明确则空字符串）\n- service_type: 枚举值 zhujia（住家）/ baiban（白班）/ yuer（育儿）/ yanglao（养老/护工）/ zhongdian（钟点工）/ feishi（菲式）/ 26day_yuesao（月嫂）/ 空\n- household_size: 家庭人口数量，如\"3口人\"\n- area: 房屋面积，如\"120平米\"\n- elderly_care: 老人照护信息（年龄/身体状况/护理需求）\n- rest_days: 每月休息天数，如\"4天\"或\"2天\"\n- start_time: 期望到岗时间，YYYY-MM-DD\n- service_address: 服务地址（区/街道）\n- helper_requirements: 对阿姨的具体要求（年龄/经验/技能/性格）\n- dietary_preferences: 家庭饮食口味/忌口\n- budget: 薪资预算，如\"6000-8000元/月\"或\"5000\"\n- service_duration: 服务周期，如\"26天\"或\"长期\"\n- special_requirements: 特殊需求\n- family_info: 家庭情况（如\"3口人，有1个3岁宝宝\"）\n\n【规则】\n- 字段未明确 → 留空字符串，不要猜\n- service_type 只取枚举值；客户自述模糊（如\"我想找一个能住家的\"）取 zhujia\n- 客户表达明显不满/要求转人工/反复问价 → 在 helper_requirements 里加 \"[需要立即转人工]\"\n- 客户的预算数字只取他主动说的，没有就空\n\n【输出】\n严格输出 JSON 对象，只包含上述 13 个字段，禁止其他字段：\n{\n  \"service_type\": \"\",\n  \"household_size\": \"\",\n  \"area\": \"\",\n  \"elderly_care\": \"\",\n  \"rest_days\": \"\",\n  \"start_time\": \"\",\n  \"service_address\": \"\",\n  \"helper_requirements\": \"\",\n  \"dietary_preferences\": \"\",\n  \"budget\": \"\",\n  \"service_duration\": \"\",\n  \"special_requirements\": \"\",\n  \"family_info\": \"\"\n}",
+    "prompt": "你是一位家政客服质检员。请根据下面这段\"雇主-小书\"对话历史，抽取结构化需求。\n\n【输入】\n{{input.conversation_text}}\n\n【抽取字段】（字段全为 string，未明确则空字符串）\n- service_type: 枚举值 zhujia（住家）/ baiban（白班）/ yuer（育儿）/ yanglao（养老/护工）/ zhongdian（钟点工）/ feishi（菲式）/ 空\n- household_size: 家庭人口数量，如\"3口人\"\n- area: 房屋面积，如\"120平米\"\n- elderly_care: 老人照护信息（年龄/身体状况/护理需求）\n- rest_days: 每月休息天数，如\"4天\"或\"2天\"\n- start_time: 期望到岗时间，YYYY-MM-DD\n- service_address: 服务地址（区/街道）\n- helper_requirements: 对阿姨的具体要求（年龄/经验/技能/性格）\n- dietary_preferences: 家庭饮食口味/忌口\n- budget: 薪资预算，如\"6000-8000元/月\"或\"5000\"\n- service_duration: 服务周期，如\"26天\"或\"长期\"\n- special_requirements: 特殊需求\n- family_info: 家庭情况（如\"3口人，有1个3岁宝宝\"）\n\n【规则】\n- 字段未明确 → 留空字符串，不要猜\n- service_type 只取枚举值；客户自述模糊（如\"我想找一个能住家的\"）取 zhujia\n- 客户表达明显不满/要求转人工/反复问价 → 在 helper_requirements 里加 \"[需要立即转人工]\"\n- 客户的预算数字只取他主动说的，没有就空\n\n【输出】\n严格输出 JSON 对象，只包含上述 13 个字段，禁止其他字段：\n{\n  \"service_type\": \"\",\n  \"household_size\": \"\",\n  \"area\": \"\",\n  \"elderly_care\": \"\",\n  \"rest_days\": \"\",\n  \"start_time\": \"\",\n  \"service_address\": \"\",\n  \"helper_requirements\": \"\",\n  \"dietary_preferences\": \"\",\n  \"budget\": \"\",\n  \"service_duration\": \"\",\n  \"special_requirements\": \"\",\n  \"family_info\": \"\"\n}",
     "jsonStructure": [
       {
         "paramType": "String",
-        "paramDescription": "服务类型，值为yuesao/baomu/baojie/yuer/yanglao，未明确则为空",
+        "paramDescription": "服务类型，值为zhujia/baiban/yuer/yanglao/zhongdian/feishi之一，未明确则为空",
         "name": "service_type"
       },
       {
-        "paramDescription": "家庭人口数量，例如：3口人",
         "name": "household_size",
-        "paramType": "String"
+        "paramType": "String",
+        "paramDescription": "家庭人口数量，例如：3口人"
       },
       {
         "paramDescription": "房屋面积，例如：120平米",
@@ -41,14 +41,14 @@
         "paramType": "String"
       },
       {
+        "paramDescription": "照顾老人的相关信息，包括老人年龄、身体状况、护理需求等",
         "name": "elderly_care",
-        "paramType": "String",
-        "paramDescription": "照顾老人的相关信息，包括老人年龄、身体状况、护理需求等"
+        "paramType": "String"
       },
       {
-        "paramDescription": "每月休息天数，例如：4天",
         "name": "rest_days",
-        "paramType": "String"
+        "paramType": "String",
+        "paramDescription": "每月休息天数，例如：4天"
       },
       {
         "name": "start_time",
@@ -66,9 +66,9 @@
         "name": "helper_requirements"
       },
       {
+        "paramType": "String",
         "paramDescription": "家庭成员的饮食口味要求、忌口等",
-        "name": "dietary_preferences",
-        "paramType": "String"
+        "name": "dietary_preferences"
       },
       {
         "paramType": "String",
@@ -93,6 +93,6 @@
     ]
   },
   "createdAt": 1786351988311,
-  "updatedAt": 1786626514615,
+  "updatedAt": 1789607740145,
   "createdBy": 7664449830109842612
 }

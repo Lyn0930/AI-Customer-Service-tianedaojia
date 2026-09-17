@@ -40,12 +40,6 @@ export class RoutingController {
     return this.routingService.getAllAgentWorkloads();
   }
 
-  @NeedLogin()
-  @Post('leads/:id/re-route')
-  async reRouteLead(@Param('id') id: string) {
-    return this.routingService.reRouteLead(id);
-  }
-
   // ===== 2026-08-14 避免"无人管"3 层 - 第 2 层任务卡 =====
   @NeedLogin()
   @Get('leads/:id/task-card')

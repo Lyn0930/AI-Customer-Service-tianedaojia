@@ -44,7 +44,6 @@ const SKILL_OPTIONS = [
   { value: '护工保姆', label: '护工保姆' },
   { value: '养老保姆', label: '养老保姆' },
   { value: '菲式保姆', label: '菲式保姆' },
-  { value: '月嫂', label: '26天月嫂' },
   { value: '投诉处理', label: '投诉处理' },
   { value: '售后处理', label: '售后处理' },
   { value: '通用咨询', label: '通用咨询' },

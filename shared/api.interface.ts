@@ -27,11 +27,11 @@ export type LeadSource =
   | '官网'
   | 'unknown';
 
-// 服务类型组：保姆 vs 月嫂
-export type ServiceTypeGroup = 'baomu' | 'yuesao';
+// 服务类型组（月嫂已下线，仅保姆组）
+export type ServiceTypeGroup = 'baomu';
 
-// 服务类型：7 个具体值
-export type ServiceType = 'zhujia' | 'yuer' | 'baiban' | 'yanglao' | 'zhongdian' | 'feishi' | '26day_yuesao';
+// 服务类型：6 个具体值
+export type ServiceType = 'zhujia' | 'yuer' | 'baiban' | 'yanglao' | 'zhongdian' | 'feishi';
 
 export type LeadStatus = 'new' | 'contacting' | 'chatting' | 'collected' | 'closed' | 'nurturing' | 'recycled' | 'filtered' | 'assigned' | 'pending';
 
@@ -79,7 +79,7 @@ export interface CreateLeadRequest {
   phoneNumber: string;
   customerName?: string;
   source?: string;
-  /** 服务类型组：保姆/月嫂 */
+  /** 服务类型组 */
   serviceTypeGroup?: ServiceTypeGroup;
   /** 服务类型：接受拼音码或中文 label（service 层归一化） */
   serviceType?: string;
@@ -167,7 +167,6 @@ export interface SyncResult {
 export type SalaryCityTier = '一线' | '二线' | '三线' | '二三线';
 export type SalaryAreaType = '大面积' | '小面积' | '不适用';
 // 2026-08-15 扩列：用于「育儿/护工/菲式」按 8h/24h 分档；钟点工/白班/住家为空
-// 6.1.7 月嫂下次录入时使用 26天/42天
 export type SalarySubDimension = '' | '8h' | '24h' | '26天' | '42天';
 
 export interface SalaryConfig {

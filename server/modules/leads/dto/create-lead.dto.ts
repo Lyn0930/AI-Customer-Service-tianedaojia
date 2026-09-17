@@ -21,7 +21,7 @@ export class CreateLeadDto {
   @IsString()
   @IsOptional()
   @ValidateIf((_o, v) => v !== undefined && v !== null && v !== '')
-  @IsEnum(['baomu', 'yuesao'])
+  @IsEnum(['baomu'])
   serviceTypeGroup?: ServiceTypeGroup;
 
   @IsString()

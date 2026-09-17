@@ -81,14 +81,14 @@ export interface HouseholdServiceDemandExtractionOneOutput {
 // ============================================================
 
 export interface SwanHomeAiCustomerServiceReplyOneInput {
-  /** 小书人设信息 */
-  persona: string;
   /** 历史对话记录 */
   conversation_history: string;
   /** 已收集的客户需求信息 */
   collected_requirements: string;
   /** 客户最新发送的消息 */
   latest_customer_message: string;
+  /** 小书人设信息 */
+  persona: string;
 }
 
 /**

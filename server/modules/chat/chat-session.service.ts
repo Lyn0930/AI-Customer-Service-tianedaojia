@@ -32,16 +32,6 @@ import type {
   RequirementStatus,
 } from '@shared/api.interface';
 
-function inferUrgencyLevel(startTime: string | null): string {
-  if (!startTime) return 'low';
-  const date = new Date(startTime);
-  if (isNaN(date.getTime())) return 'low';
-  const diffDays = (date.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-  if (diffDays <= 7) return 'high';
-  if (diffDays <= 30) return 'medium';
-  return 'low';
-}
-
 @Injectable()
 export class ChatSessionService {
   private readonly logger = new Logger(ChatSessionService.name);
@@ -461,10 +451,9 @@ export class ChatSessionService {
    *
    * 优先级：
    *   1. 源码 OPENING_MESSAGES_BY_SERVICE（按 rawServiceType，6 段）
-   *   2. 源码 OPENING_MESSAGES（按 normalizeServiceType，5 段 baomu/yuesao/yanglao/yuer/baojie）
+   *   2. 源码 OPENING_MESSAGES（按 normalizeServiceType，3 段 baomu/yanglao/yuer）
    *   3. 动态拼接（基于 serviceCity + serviceType 复述表单信息）
    *
-   * 月嫂（26day_yuesao / yuesao）由第 1/2 级模板覆盖。
    * 老客回归检测、数据库配置层、渠道表单短开场白层已于 2026-08-27 移除。
    */
   public async buildOpeningMessage(
@@ -478,15 +467,13 @@ export class ChatSessionService {
           '住家': '住家保姆', '白班': '白班保姆', '育儿': '育儿保姆',
           zhongdian: '钟点工保姆', '钟点': '钟点工保姆', '钟点工': '钟点工保姆',
           feishi: '菲式保姆', '菲式': '菲式保姆', '菲佣': '菲式保姆',
-          '26day_yuesao': '26天月嫂', '月嫂': '26天月嫂',
           yanglao: '护工保姆', '养老': '护工保姆', '护工': '护工保姆',
-          baojie: '保洁', '保洁': '保洁',
         } as Record<string, string>)[rawServiceType] ?? getServiceTypeLabel(rawServiceType)
       : null;
 
-    // 1) chat.prompt.ts 的 6 段按 serviceType 模板（含月嫂兜底）
+    // 1) chat.prompt.ts 的 6 段按 serviceType 模板
     // rawServiceType 可能是中文（form 留资 cnServiceType 写库, since 160cbc6）也可能是 pinyin
-    // 统一转 pinyin 再查 OPENING_MESSAGES_BY_SERVICE（key = zhongdian/baiban/zhujia/yuer/yanglao/feishi/26day_yuesao）
+    // 统一转 pinyin 再查 OPENING_MESSAGES_BY_SERVICE（key = zhongdian/baiban/zhujia/yuer/yanglao/feishi）
     const pinyinServiceType = rawServiceType ? normalizeServiceSubType(rawServiceType) : null;
     if (pinyinServiceType && OPENING_MESSAGES_BY_SERVICE[pinyinServiceType]) {
       return OPENING_MESSAGES_BY_SERVICE[pinyinServiceType];

@@ -379,14 +379,14 @@ export class ChatRequirementsService {
 
     // 同步更新 leads 表：采集字段
     const normalizedType = result.service_type ? normalizeServiceType(result.service_type) : null;
-    const urgencyLevel = inferUrgencyLevel(result.start_time);
+    const urgencyLevel = result.start_time ? inferUrgencyLevel(result.start_time) : undefined;
     await this.db
       .update(leads)
       .set({
         budgetRange: sql`COALESCE(${leads.budgetRange}, NULLIF(${normBudget ?? null}, ''))`,
         serviceStartTime: sql`COALESCE(${leads.serviceStartTime}, NULLIF(${result.start_time ?? null}, ''))`,
         specialRequirements: sql`COALESCE(${leads.specialRequirements}, NULLIF(${result.special_requirements ?? null}, ''))`,
-        urgencyLevel,
+        ...(urgencyLevel !== undefined ? { urgencyLevel } : {}),
         ...(isCompleted ? { status: 'collected', intent: normalizedType } : {}),
       })
       .where(eq(leads.id, leadId));

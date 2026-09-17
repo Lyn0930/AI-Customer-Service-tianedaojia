@@ -10,7 +10,7 @@ import {
 const CITY_TIERS = ['一线', '二线', '三线', '二三线'] as const;
 // 2026-08-15 扩列：钟点工/白班/育儿/护工/菲式 不按户型分档 → '不适用'
 const AREA_TYPES = ['大面积', '小面积', '不适用'] as const;
-// 2026-08-15 扩列：subDimension 空 / 8h / 24h（6.1.7 月嫂 26天/42天 留到下次）
+// 2026-08-15 扩列：subDimension 空 / 8h / 24h
 const SUB_DIMENSIONS = ['', '8h', '24h'] as const;
 
 export class CreateSalaryConfigDto {

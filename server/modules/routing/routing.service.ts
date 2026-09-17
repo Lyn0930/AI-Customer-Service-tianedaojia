@@ -249,11 +249,6 @@ export class RoutingService {
     return this.selectAndAssign(lead, targetSkill, intent, isPriority);
   }
 
-  /** @deprecated 同 routeLead，保留仅供回滚 */
-  async reRouteLead(leadId: string): Promise<RoutingResult> {
-    return this.routeLead(leadId);
-  }
-
   // ============ 2026-08-14 避免"无人管"3 层 - 第 2 层任务卡 ============
 
   /**
@@ -329,9 +324,9 @@ export class RoutingService {
       lastCustomerMessage,
       recommendedScripts,
       urgency:
-        lead.urgencyLevel === 'urgent'
+        lead.urgencyLevel === 'high'
           ? '🔥 紧急'
-          : lead.urgencyLevel === 'soon'
+          : lead.urgencyLevel === 'medium'
             ? '⏰ 较急'
             : '普通',
     };

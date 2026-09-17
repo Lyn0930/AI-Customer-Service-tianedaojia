@@ -25,7 +25,7 @@ import {
 } from '@client/src/components/ui/dialog';
 import { showConfirm } from '@lark-apaas/client-toolkit';
 
-// 2026-08-15 扩列后支持的 6 类服务（不含 6.1.7 月嫂）
+// 2026-08-15 扩列后支持的 6 类服务
 const SERVICE_TYPES: ReadonlyArray<string> = [
   '住家保姆',
   '钟点工',
@@ -142,7 +142,7 @@ const SalaryConfigTab: React.FC = () => {
         <div className="font-semibold mb-1">市场薪资话术 · 业务可维护</div>
         <div>
           这里维护的是 AI 在「客户询问市场薪资」时参考的区间。改完后<strong>不需要走代码发布</strong>，
-          下一次对话生效。覆盖 6 类服务（住家保姆/钟点工/白班/育儿/护工/菲式）；6.1.7 月嫂下次补。
+          下一次对话生效。覆盖 6 类服务（住家保姆/钟点工/白班/育儿/护工/菲式）。
         </div>
       </div>
 

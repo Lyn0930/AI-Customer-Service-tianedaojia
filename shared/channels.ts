@@ -153,15 +153,14 @@ export function sanitizeCity(city: string): string {
   return result.trim();
 }
 
-export const SERVICE_TYPE_GROUPS = ['baomu', 'yuesao'] as const;
+export const SERVICE_TYPE_GROUPS = ['baomu'] as const;
 export type ServiceTypeGroup = (typeof SERVICE_TYPE_GROUPS)[number];
 
 export const SERVICE_TYPE_GROUP_LABELS: Record<ServiceTypeGroup, string> = {
   baomu: '保姆',
-  yuesao: '月嫂',
 };
 
-export const SERVICE_TYPES = ['zhujia', 'yuer', 'baiban', 'yanglao', 'zhongdian', 'feishi', '26day_yuesao'] as const;
+export const SERVICE_TYPES = ['zhujia', 'yuer', 'baiban', 'yanglao', 'zhongdian', 'feishi'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
 // 服务类型展示文案（保姆组加「保姆」后缀，与用户原 base 选项对齐）
@@ -172,7 +171,6 @@ export const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
   yanglao: '护工保姆',
   zhongdian: '钟点工保姆',
   feishi: '菲式保姆',
-  '26day_yuesao': '26天月嫂',
 };
 
 export const SERVICE_TYPE_OPTIONS_BAOMU: { value: ServiceType; label: string }[] = [
@@ -184,12 +182,8 @@ export const SERVICE_TYPE_OPTIONS_BAOMU: { value: ServiceType; label: string }[]
   { value: 'feishi', label: '菲式保姆' },
 ];
 
-export const SERVICE_TYPE_OPTIONS_YUESAO: { value: ServiceType; label: string }[] = [
-  { value: '26day_yuesao', label: '26天月嫂' },
-];
-
-export function getServiceTypeOptions(group: ServiceTypeGroup) {
-  return group === 'baomu' ? SERVICE_TYPE_OPTIONS_BAOMU : SERVICE_TYPE_OPTIONS_YUESAO;
+export function getServiceTypeOptions(_group: ServiceTypeGroup) {
+  return SERVICE_TYPE_OPTIONS_BAOMU;
 }
 
 // 解析 URL 参数

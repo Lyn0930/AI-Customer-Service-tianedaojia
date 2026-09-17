@@ -97,7 +97,7 @@ export class RequirementCollectionService {
     if (status.nextField) {
       parts.push('');
       if (!serviceType && status.collected.length === 0) {
-        parts.push(`【当前任务】服务类型尚未确认，请先询问客户需要哪种服务（钟点工保姆/白班保姆/住家保姆/育儿保姆/护工保姆/菲式保姆/月嫂等），不要直接询问老人照护、宝宝年龄等具体细节。`);
+        parts.push(`【当前任务】服务类型尚未确认，请先询问客户需要哪种服务（钟点工保姆/白班保姆/住家保姆/育儿保姆/护工保姆/菲式保姆），不要直接询问老人照护、宝宝年龄等具体细节。`);
       } else {
         let question = status.nextField.question;
         if (status.nextField.key === 'serviceAddress' && serviceCity) {
